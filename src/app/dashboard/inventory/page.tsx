@@ -299,97 +299,8 @@ const RowPrintIcon = () => (
 );
 
   return (
-    <main className="min-h-screen bg-[#f5f7fb] text-[#111827]">
-      <div className="flex min-h-screen w-full overflow-x-hidden">
-       <aside className="hidden w-72 shrink-0 border-r border-gray-200 bg-white lg:block">
-  <div className="border-b border-gray-200 px-6 py-6">
-    <h1 className="text-2xl font-bold tracking-tight">District</h1>
-    <p className="text-sm text-gray-500">Internal Hub</p>
-  </div>
-
-  <div className="space-y-6 px-4 py-6">
-    <div>
-      <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
-        Dashboard
-      </p>
-      <div className="space-y-1">
-        <a
-          href="/dashboard"
-          className="block rounded-xl px-4 py-3 text-gray-700 hover:bg-gray-100"
-        >
-          Overview
-        </a>
-      </div>
-    </div>
-
-    <div>
-      <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
-        Sales
-      </p>
-      <div className="space-y-1">
-        <a
-          href="/dashboard/pipeline"
-          className="block rounded-xl px-4 py-3 text-gray-700 hover:bg-gray-100"
-        >
-          Pipeline
-        </a>
-        <a
-          href="/dashboard/activity"
-          className="block rounded-xl px-4 py-3 text-gray-700 hover:bg-gray-100"
-        >
-          Activity
-        </a>
-      </div>
-    </div>
-
-    <div>
-      <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
-        Operations
-      </p>
-      <div className="rounded-2xl bg-[#eef6ff] p-2 space-y-1">
-        <div className="rounded-xl bg-gradient-to-r from-[#19c6b4] to-[#3b82f6] px-4 py-3 font-semibold text-white shadow-sm">
-          Shipments
-        </div>
-
-        <a
-          href="/dashboard/purchase-orders"
-          className="block rounded-xl px-4 py-3 text-gray-700 hover:bg-white"
-        >
-          Purchase Orders
-        </a>
-
-        <a
-          href="/dashboard/inventory"
-          className="block rounded-xl px-4 py-3 text-gray-700 hover:bg-white"
-        >
-          Inventory
-        </a>
-      </div>
-    </div>
-
-    <div>
-      <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
-        Admin
-      </p>
-      <div className="space-y-1">
-        <a
-          href="/dashboard/team"
-          className="block rounded-xl px-4 py-3 text-gray-700 hover:bg-gray-100"
-        >
-          Team
-        </a>
-        <a
-          href="/dashboard/settings"
-          className="block rounded-xl px-4 py-3 text-gray-700 hover:bg-gray-100"
-        >
-          Settings
-        </a>
-      </div>
-    </div>
-  </div>
-</aside>
-
-        <section className="min-w-0 flex-1 border-r border-gray-200">
+  <>
+    <section className="min-w-0 flex-1 border-r border-gray-200 bg-[#f5f7fb] text-[#111827]">
   <div className="border-b border-gray-200 bg-white">
     <div className="px-6 py-5 lg:px-8">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
@@ -730,7 +641,7 @@ const RowPrintIcon = () => (
             </div>
           </div>
                </section>
-      </div>
+      
 
       {uploadDraftModalOpen && (
         <div
@@ -780,6 +691,6 @@ const RowPrintIcon = () => (
           </div>
         </div>
       )}
-    </main>
+    </>
   );
 }

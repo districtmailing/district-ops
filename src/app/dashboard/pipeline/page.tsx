@@ -1235,7 +1235,10 @@ useEffect(() => {
       return;
     }
 
-    const groupedNotes: Record<string, { date: string; time: string; type: string; text: string }[]> = {};
+    const groupedNotes: Record<
+  string,
+  { date: string; time: string; type: string; text: string }[]
+> = {};
 
     (data || []).forEach((note: any) => {
      const { date, time } = formatActivityDateTime(note.created_at);
@@ -1338,61 +1341,8 @@ useEffect(() => {
   const timelineHours = Array.from({ length: 11 }, (_, i) => 8 + i);
 
   return (
-    <main className="min-h-screen w-full overflow-x-hidden bg-[#f3f4f6] text-[#111827]">
-      <div className="flex min-h-screen w-full overflow-x-hidden">
-        <aside className="hidden w-72 shrink-0 border-r border-gray-200 bg-white lg:block">
-          <div className="border-b border-gray-200 px-6 py-6">
-            <h1 className="text-2xl font-bold tracking-tight">District</h1>
-            <p className="text-sm text-gray-500">Internal Hub</p>
-          </div>
-
-          <div className="space-y-6 px-4 py-6">
-            <div>
-              <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
-                Dashboard
-              </p>
-              <a href="/dashboard" className="block rounded-xl px-3 py-3 text-gray-700 hover:bg-gray-100">
-                Overview
-              </a>
-            </div>
-
-            <div>
-              <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
-                Sales
-              </p>
-              <div className="rounded-2xl bg-[#dfe7f3] p-2">
-                <div className="rounded-xl bg-gradient-to-r from-teal-400 to-blue-500 px-4 py-3 font-semibold text-white shadow-sm">
-                  Pipeline
-                </div>
-                <a href="/dashboard/activity" className="mt-2 block rounded-xl px-4 py-3 text-gray-700 hover:bg-white/70">
-                  Activity
-                </a>
-              </div>
-            </div>
-
-            <div>
-              <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
-                Operations
-              </p>
-              <div className="space-y-2">
-                <div className="rounded-xl px-3 py-3 text-gray-700 hover:bg-gray-100">Purchase Orders</div>
-                <div className="rounded-xl px-3 py-3 text-gray-700 hover:bg-gray-100">Inventory</div>
-              </div>
-            </div>
-
-            <div>
-              <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
-                Admin
-              </p>
-              <div className="space-y-2">
-                <div className="rounded-xl px-3 py-3 text-gray-700 hover:bg-gray-100">Team</div>
-                <div className="rounded-xl px-3 py-3 text-gray-700 hover:bg-gray-100">Settings</div>
-              </div>
-            </div>
-          </div>
-        </aside>
-
-        <section className="min-w-0 flex-1 border-r border-gray-200">
+  <>
+    <section className="min-w-0 flex-1 border-r border-gray-200 bg-[#f3f4f6] text-[#111827]">
           <div className="w-full border-b border-gray-200 bg-white px-6 py-5 lg:px-8">
             <div className="flex items-start justify-between gap-6">
               <div>
@@ -2544,7 +2494,7 @@ const width = 100 / overlapping.length;
         </div>
       </div>
 
-      <div className="mt-8 flex justify-end gap-3">
+           <div className="mt-8 flex justify-end gap-3">
         <button
           onClick={() => {
             setEditModalOpen(false);
@@ -2565,8 +2515,7 @@ const width = 100 / overlapping.length;
     </div>
   </div>
 )}
-      </div>
-      {addModalOpen && (
+{addModalOpen && (
   <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 px-4">
     <div className="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl">
       <div className="flex items-center justify-between">
@@ -3022,6 +2971,6 @@ const width = 100 / overlapping.length;
     </div>
   </div>
 )}
-    </main>
-  );
+  </>
+);
 }

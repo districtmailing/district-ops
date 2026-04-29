@@ -323,14 +323,14 @@ setCurrentTeamId(teamMemberData?.team_id || null);
   .eq("team_id", teamMemberData.team_id)
   .eq("status", "pending");
 
-const pendingMembers =
+const pendingMembers: TeamMember[] =
   invites?.map((inv: any) => ({
     id: inv.id,
     name: "Pending Member",
     email: inv.email,
     role: inv.role,
     joined: "Pending",
-    status: "Pending",
+    status: "Pending" as const,
   })) || [];
 
 setTeamMembers([...activeMembers, ...pendingMembers]);

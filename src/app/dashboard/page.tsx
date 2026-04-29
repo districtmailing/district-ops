@@ -1,190 +1,314 @@
+"use client";
+
+import { useState } from "react";
+
+const summaryCards = [
+  {
+    label: "Today's Revenue",
+    value: "$0",
+    subtext: "0 orders • 0 units",
+    iconBg: "bg-[#e8fbf7]",
+    iconText: "text-[#19c6b4]",
+    icon: (
+      <svg
+        viewBox="0 0 24 24"
+        className="h-6 w-6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M12 2v20" />
+        <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7H14.5a3.5 3.5 0 0 1 0 7H6" />
+      </svg>
+    ),
+  },
+  {
+    label: "30-Day Revenue",
+    value: "$0",
+    subtext: "0 orders",
+    iconBg: "bg-[#eafaf3]",
+    iconText: "text-[#10b981]",
+    icon: (
+      <svg
+        viewBox="0 0 24 24"
+        className="h-6 w-6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M7 17 17 7" />
+        <path d="M9 7h8v8" />
+      </svg>
+    ),
+  },
+  {
+    label: "30-Day Units",
+    value: "0",
+    subtext: "units sold",
+    iconBg: "bg-[#ebf3ff]",
+    iconText: "text-[#3b82f6]",
+    icon: (
+      <svg
+        viewBox="0 0 24 24"
+        className="h-6 w-6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M12 2 20 6.5v11L12 22l-8-4.5v-11L12 2Z" />
+        <path d="M12 22V12" />
+        <path d="M20 6.5 12 12 4 6.5" />
+      </svg>
+    ),
+  },
+  {
+    label: "30-Day Orders",
+    value: "0",
+    subtext: "total orders",
+    iconBg: "bg-[#f3ebff]",
+    iconText: "text-[#7c3aed]",
+    icon: (
+      <svg
+        viewBox="0 0 24 24"
+        className="h-6 w-6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <circle cx="9" cy="20" r="1" />
+        <circle cx="18" cy="20" r="1" />
+        <path d="M3 4h2l2.4 10.2a1 1 0 0 0 1 .8h9.7a1 1 0 0 0 1-.8L21 7H7" />
+      </svg>
+    ),
+  },
+  {
+    label: "30-Day Refunds",
+    value: "$0",
+    subtext: "0 refunds",
+    valueClass: "text-[#ef4444]",
+    iconBg: "bg-[#ffeded]",
+    iconText: "text-[#ef4444]",
+    icon: (
+  <svg
+    viewBox="0 0 24 24"
+    className="h-6 w-6"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    {/* Dollar */}
+    <path d="M12 2v20" />
+    <path d="M17 6H9.5a3.5 3.5 0 0 0 0 7H14.5a3.5 3.5 0 0 1 0 7H6" />
+
+    {/* Slash */}
+    <path d="M4 4l16 16" />
+  </svg>
+),
+  },
+  {
+    label: "30-Day Net",
+    value: "$0",
+    subtext: "after refunds",
+    iconBg: "bg-[#eafaf3]",
+    iconText: "text-[#10b981]",
+    icon: (
+      <svg
+        viewBox="0 0 24 24"
+        className="h-6 w-6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M7 17 17 7" />
+        <path d="M9 7h8v8" />
+      </svg>
+    ),
+  },
+];
+
+const RANGE_OPTIONS = [
+  "Last 7 Days",
+  "Last 14 Days",
+  "Last 30 Days",
+  "Quarterly",
+  "Yearly",
+  "Custom Range",
+];
+
 export default function DashboardPage() {
+  const [selectedRange, setSelectedRange] = useState("Last 30 Days");
+  const [rangeOpen, setRangeOpen] = useState(false);
+
   return (
-    <section className="flex-1">
-      {/* TOP BAR */}
+    <section className="flex-1 bg-[#f6f8fb]">
+      {/* TOP BAR - KEEP THIS STYLE */}
       <div className="border-b border-gray-200 bg-white px-6 py-5 lg:px-8">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h2 className="text-3xl font-bold tracking-tight">Overview</h2>
+            <h2 className="text-3xl font-bold tracking-tight text-[#111827]">
+              Sales Overview
+            </h2>
             <p className="mt-1 text-sm text-gray-500">
-              Welcome back. Here’s what’s happening today.
+              Welcome back! Here’s what’s happening currently.
             </p>
           </div>
 
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <input
-              type="text"
-              placeholder="Search..."
-              className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm outline-none placeholder:text-gray-400 focus:border-teal-400 sm:w-72"
-            />
-            <div className="rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-700">
-              Dalin Marinos
-            </div>
+          <div className="relative">
+            <button
+              onClick={() => setRangeOpen((prev) => !prev)}
+              className="flex min-w-[220px] items-center justify-between rounded-2xl border border-gray-300 bg-white px-5 py-3 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+            >
+              <span>{selectedRange}</span>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className={`h-5 w-5 text-gray-500 transition ${
+                  rangeOpen ? "rotate-180" : ""
+                }`}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+            
+
+            {rangeOpen && (
+              <div className="absolute right-0 top-[calc(100%+10px)] z-50 w-[220px] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl">
+                {RANGE_OPTIONS.map((option) => {
+                  const isActive = selectedRange === option;
+
+                  return (
+                    <button
+                      key={option}
+                      onClick={() => {
+                        setSelectedRange(option);
+                        setRangeOpen(false);
+                      }}
+                      className={`flex w-full items-center gap-3 px-4 py-3 text-left text-sm transition ${
+                        isActive
+                          ? "bg-teal-400 text-[#111827] font-semibold"
+                          : "text-gray-700 hover:bg-gray-50"
+                      }`}
+                    >
+                      <span className="w-4">
+                        {isActive && (
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            className="h-4 w-4"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="3"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M20 6 9 17l-5-5" />
+                          </svg>
+                        )}
+                      </span>
+                      <span>{option}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>
+      
 
       {/* DASHBOARD BODY */}
       <div className="px-6 py-6 lg:px-8">
-        {/* TOP CARDS */}
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-            <p className="text-sm text-gray-500">Calls Today</p>
-            <p className="mt-3 text-3xl font-bold">18</p>
-            <p className="mt-2 text-sm text-teal-600">+4 from yesterday</p>
-          </div>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+  {summaryCards.map((card) => (
+    <div
+      key={card.label}
+      className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm transition hover:-translate-y-[1px] hover:shadow-md"
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-gray-500 whitespace-nowrap">
+  {card.label}
+</p>
 
-          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-            <p className="text-sm text-gray-500">Follow-Ups Due</p>
-            <p className="mt-3 text-3xl font-bold">11</p>
-            <p className="mt-2 text-sm text-amber-600">3 overdue</p>
-          </div>
+          <p
+            className={`mt-3 text-4xl font-bold tracking-tight ${
+              card.valueClass || "text-[#111827]"
+            }`}
+          >
+            {card.value}
+          </p>
 
-          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-            <p className="text-sm text-gray-500">Open Purchase Orders</p>
-            <p className="mt-3 text-3xl font-bold">4</p>
-            <p className="mt-2 text-sm text-gray-500">2 arriving this week</p>
-          </div>
-
-          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-            <p className="text-sm text-gray-500">Low Stock Items</p>
-            <p className="mt-3 text-3xl font-bold">9</p>
-            <p className="mt-2 text-sm text-red-500">Needs review</p>
-          </div>
+          <p className="mt-2 text-sm text-gray-500 whitespace-nowrap">
+  {card.subtext}
+</p>
         </div>
 
-        {/* MAIN GRID */}
-        <div className="mt-6 grid gap-6 xl:grid-cols-3">
-          <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm xl:col-span-2">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xl font-semibold">Recent Activity</h3>
-              <button className="text-sm font-medium text-teal-600 hover:underline">
-                View All
-              </button>
-            </div>
+        <div
+  className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ${card.iconBg} ${card.iconText} mt-6 ml-2`}
+>
+  {card.icon}
+</div>
+      </div>
+    </div>
+  ))}
+</div>
 
-            <div className="mt-6 space-y-4">
-              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                <p className="font-medium">Called Cedar Bear</p>
-                <p className="mt-1 text-sm text-gray-500">
-                  Follow-up scheduled for Thursday at 2:00 PM
-                </p>
-              </div>
 
-              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                <p className="font-medium">Billy logged 5 new call attempts</p>
-                <p className="mt-1 text-sm text-gray-500">
-                  Activity updated across current pipeline
-                </p>
-              </div>
 
-              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                <p className="font-medium">New PO created for Nordic Naturals</p>
-                <p className="mt-1 text-sm text-gray-500">
-                  PO-1048 submitted and waiting on receiving
-                </p>
-              </div>
+<div className="mt-6 grid gap-6 xl:grid-cols-2">
+  <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+    <h3 className="text-2xl font-semibold text-[#111827]">Revenue Trend</h3>
 
-              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                <p className="font-medium">Inventory alert triggered for ResMed F20</p>
-                <p className="mt-1 text-sm text-gray-500">
-                  Suggested restock review based on recent velocity
-                </p>
-              </div>
-            </div>
-          </div>
+    <div className="mt-6 flex min-h-[320px] items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-[#f8fafc]">
+      <div className="text-center">
+        <p className="text-2xl font-semibold text-gray-500">
+          No sales data available for this period
+        </p>
+      </div>
+    </div>
+  </div>
 
-          <div className="space-y-6">
-            <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-              <h3 className="text-xl font-semibold">Top Reps Today</h3>
+  <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+    <h3 className="text-2xl font-semibold text-[#111827]">Units Sold</h3>
 
-              <div className="mt-5 space-y-4">
-                <div className="flex items-center justify-between rounded-xl bg-gray-50 px-4 py-3">
-                  <span className="font-medium">Dalin</span>
-                  <span className="font-semibold text-teal-600">22 calls</span>
-                </div>
+    <div className="mt-6 flex min-h-[320px] items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-[#f8fafc]">
+      <div className="text-center">
+        <p className="text-2xl font-semibold text-gray-500">
+          No units data available for this period
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
 
-                <div className="flex items-center justify-between rounded-xl bg-gray-50 px-4 py-3">
-                  <span className="font-medium">Billy</span>
-                  <span className="font-semibold text-teal-600">17 calls</span>
-                </div>
+        {/* ACTIVITY FEED */}
+        <div className="mt-10">
+          <h3 className="text-3xl font-semibold text-[#111827]">
+            Activity Feed
+          </h3>
 
-                <div className="flex items-center justify-between rounded-xl bg-gray-50 px-4 py-3">
-                  <span className="font-medium">Jon</span>
-                  <span className="font-semibold text-teal-600">13 calls</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-              <h3 className="text-xl font-semibold">Today’s Focus</h3>
-
-              <div className="mt-5 space-y-3">
-                <div className="rounded-xl bg-[#eef6ff] px-4 py-3 text-sm text-gray-700">
-                  Follow up with 11 active leads
-                </div>
-                <div className="rounded-xl bg-[#eef6ff] px-4 py-3 text-sm text-gray-700">
-                  Review 4 open purchase orders
-                </div>
-                <div className="rounded-xl bg-[#eef6ff] px-4 py-3 text-sm text-gray-700">
-                  Check 9 low stock items
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* LOWER GRID */}
-        <div className="mt-6 grid gap-6 xl:grid-cols-2">
-          <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xl font-semibold">Purchase Orders</h3>
-              <button className="text-sm font-medium text-teal-600 hover:underline">
-                View All
-              </button>
-            </div>
-
-            <div className="mt-5 space-y-4">
-              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                <p className="font-medium">PO-1048 · Nordic Naturals</p>
-                <p className="mt-1 text-sm text-gray-500">$8,420 · Awaiting receiving</p>
-              </div>
-
-              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                <p className="font-medium">PO-1049 · ResMed</p>
-                <p className="mt-1 text-sm text-gray-500">$12,770 · In transit</p>
-              </div>
-
-              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                <p className="font-medium">PO-1050 · Thorne</p>
-                <p className="mt-1 text-sm text-gray-500">$5,980 · Pending confirmation</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xl font-semibold">Inventory Watchlist</h3>
-              <button className="text-sm font-medium text-teal-600 hover:underline">
-                Review
-              </button>
-            </div>
-
-            <div className="mt-5 space-y-4">
-              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                <p className="font-medium">ResMed AirTouch F20 Cushion</p>
-                <p className="mt-1 text-sm text-gray-500">12 days of stock left</p>
-              </div>
-
-              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                <p className="font-medium">Good Day Chocolate Sleep</p>
-                <p className="mt-1 text-sm text-gray-500">Restock suggested this week</p>
-              </div>
-
-              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                <p className="font-medium">Boveda 62% Packs</p>
-                <p className="mt-1 text-sm text-gray-500">Velocity increased 18% this month</p>
-              </div>
+          <div className="mt-6 min-h-[160px] rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+            <div className="flex h-[100px] items-center justify-center">
+              <p className="text-lg text-gray-400">
+                Recent PO and shipment activity will appear here
+              </p>
             </div>
           </div>
         </div>

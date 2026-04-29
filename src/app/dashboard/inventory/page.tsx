@@ -318,7 +318,7 @@ const RowPrintIcon = () => (
     <div className="border-t border-gray-200 px-6 py-3 lg:px-8">
   <div className="flex flex-wrap items-center gap-3">
     <a
-      href="/dashboard/shipments"
+      href="/dashboard/shipment"
       className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
     >
       <svg
@@ -350,7 +350,7 @@ const RowPrintIcon = () => (
     </a>
 
     <a
-      href="/dashboard/shipments/drafts"
+      href="/dashboard/drafts"
       className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
     >
       <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -361,7 +361,7 @@ const RowPrintIcon = () => (
     </a>
 
     <a
-      href="/dashboard/shipments/fba"
+      href="/dashboard/fba"
       className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
     >
       <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -372,7 +372,7 @@ const RowPrintIcon = () => (
     </a>
 
     <a
-      href="/dashboard/shipments/shipped"
+      href="/dashboard/shipped"
       className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
     >
       <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabase";
 type Company = {
@@ -15,6 +16,8 @@ type Company = {
   website: string;
 address: string;
 latestNote: string;
+createdAt?: string;
+lastContactedAt?: string;
   notes: { date: string; type: string; text: string }[];
   calls: number;
   emails: number;
@@ -62,6 +65,66 @@ function formatActivityDateTime(value: string) {
     }),
   };
 }
+function formatDisplayDate(value?: string | null) {
+  if (!value) return "—";
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "—";
+
+  return parsed.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function formatDisplayDateTime(value?: string | null) {
+  if (!value) return "—";
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "—";
+
+  return parsed.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function ActivityIcon({ type }: { type: string }) {
+  if (type === "Call") {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="h-4 w-4"
+      >
+        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.08 4.18 2 2 0 0 1 4.06 2h3a2 2 0 0 1 2 1.72c.12.9.33 1.77.63 2.61a2 2 0 0 1-.45 2.11L8 9.91a16 16 0 0 0 6.09 6.09l1.47-1.24a2 2 0 0 1 2.11-.45c.84.3 1.71.51 2.61.63A2 2 0 0 1 22 16.92Z" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-4 w-4"
+    >
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="m4 7 8 6 8-6" />
+    </svg>
+  );
+}
 function shouldShowWarning(
   company: Company,
   companyNotes: Record<string, { date: string; time: string; type: string; text: string }[]>
@@ -94,6 +157,8 @@ function mapCompanyRow(row: any): Company {
     website: row.website || "",
     address: row.address || "",
     latestNote: row.latest_note || "",
+    createdAt: row.created_at || "",
+lastContactedAt: row.last_contacted_at || "",
     notes: [],
     calls: 0,
     emails: 0,
@@ -110,20 +175,30 @@ function formatWebsiteUrl(url: string) {
     : `https://${url}`;
 }
 
-const TRADE_SHOW_OPTIONS = ["MedTrade", "Expo West", "ASD"];
-const REP_OPTIONS = ["William", "Evan", "Dalin", "Yana", "Jon", "Prince"];
+
 const STATUS_OPTIONS = ["WIP", "Company call done", "YES", "None"];
 
 export default function PipelinePage() {
-  const [selectedShow, setSelectedShow] = useState("MedTrade");
-  const [selectedRep, setSelectedRep] = useState("William");
-  const [selectedStatus, setSelectedStatus] = useState("All Statuses");
+  const [selectedShow, setSelectedShow] = useState("TRADESHOW");
+const [selectedRep, setSelectedRep] = useState("SALES REP");
+const [selectedStatus, setSelectedStatus] = useState("STATUS");
   const [search, setSearch] = useState("");
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ top: number; right: number } | null>(null);
+  const [statusMenuOpenId, setStatusMenuOpenId] = useState<string | null>(null);
+const [statusMenuPosition, setStatusMenuPosition] = useState<{ top: number; left: number; width: number } | null>(null);
+const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [selectedCompanyId, setSelectedCompanyId] = useState("dynarex");
   const [activeTab, setActiveTab] = useState<"Overview" | "Notes" | "Activity" | "Documents">("Overview");
+  const [tradeShowOptions, setTradeShowOptions] = useState<string[]>([]);
+const [repOptions, setRepOptions] = useState<string[]>([]);
+const [currentTeamId, setCurrentTeamId] = useState<string | null>(null);
+const [manageTradeShowsOpen, setManageTradeShowsOpen] = useState(false);
+const [editingTradeShowName, setEditingTradeShowName] = useState("");
+const [editingTradeShowValue, setEditingTradeShowValue] = useState("");
+const [newTradeShowName, setNewTradeShowName] = useState("");
+const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const [focusItems, setFocusItems] = useState<string[]>([]);
   const [isEditingFocus, setIsEditingFocus] = useState(false);
@@ -131,6 +206,9 @@ export default function PipelinePage() {
   const [dayNotes, setDayNotes] = useState("");
   const [dayNotesSaved, setDayNotesSaved] = useState(true);
 const dayNotesAutosaveTimeout = useRef<any>(null);
+const focusAutosaveTimeout = useRef<any>(null);
+const focusTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+const dayNotesTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 const [selectedDate, setSelectedDate] = useState(() => {
   return new Date().toISOString().split("T")[0];
 });
@@ -156,10 +234,11 @@ const [editedEvent, setEditedEvent] = useState({
   const [newCompanyNote, setNewCompanyNote] = useState("");
   const [isEditingCompany, setIsEditingCompany] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
+  const [companyNameError, setCompanyNameError] = useState("");
 const [editedCompany, setEditedCompany] = useState({
   company: "",
-  show: "",
-  rep: "",
+  show: "MedTrade",
+  rep: "William",
   contact: "",
   email: "",
   phone: "",
@@ -178,7 +257,7 @@ const [newCompany, setNewCompany] = useState({
   website: "",
   address: "",
   latestNote: "",
-  status: "None",
+  status: "",
 });
 const [importPreviewOpen, setImportPreviewOpen] = useState(false);
 const [pendingImportRows, setPendingImportRows] = useState<
@@ -205,12 +284,24 @@ const importFileRef = useRef<HTMLInputElement | null>(null);
 
   const filteredCompanies = useMemo(() => {
   return companyList.filter((c) => {
-    const showMatch = selectedShow === "All Shows" || c.show === selectedShow;
-    const repMatch = selectedRep === "All Reps" || c.rep === selectedRep;
-    const statusMatch = selectedStatus === "All Statuses" || c.status === selectedStatus;
+    const searchValue = search.trim().toLowerCase();
     const searchText = `${c.company} ${c.contact} ${c.email} ${c.website}`.toLowerCase();
-    const searchMatch = searchText.includes(search.toLowerCase());
-    return showMatch && repMatch && statusMatch && searchMatch;
+    const searchMatch = searchText.includes(searchValue);
+
+    if (searchValue) {
+      return searchMatch;
+    }
+
+    const showMatch =
+  selectedShow === "TRADESHOW" || selectedShow === "All Shows" || c.show === selectedShow;
+
+const repMatch =
+  selectedRep === "SALES REP" || selectedRep === "All Reps" || c.rep === selectedRep;
+
+const statusMatch =
+  selectedStatus === "STATUS" || selectedStatus === "All Statuses" || c.status === selectedStatus;
+
+    return showMatch && repMatch && statusMatch;
   });
 }, [companyList, selectedShow, selectedRep, selectedStatus, search]);
 const availableTradeShows = useMemo(() => {
@@ -218,8 +309,8 @@ const availableTradeShows = useMemo(() => {
     .map((company) => company.show)
     .filter(Boolean);
 
-  return Array.from(new Set([...TRADE_SHOW_OPTIONS, ...showsFromCompanies]));
-}, [companyList]);
+  return Array.from(new Set([...tradeShowOptions, ...showsFromCompanies]));
+}, [companyList, tradeShowOptions]);
 
   const selectedCompany =
     filteredCompanies.find((c) => c.id === selectedCompanyId) ||
@@ -229,6 +320,13 @@ const selectedCompanyActivity =
   selectedCompany
     ? (companyNotes[selectedCompany.id] || []).filter(
         (item) => item.type === "Call" || item.type === "Email"
+      )
+    : [];
+
+    const selectedCompanyNotes =
+  selectedCompany
+    ? (companyNotes[selectedCompany.id] || []).filter(
+        (item) => item.type === "Note"
       )
     : [];
 
@@ -277,12 +375,15 @@ const removeFocusItem = (index: number) => {
   setFocusItems(focusItems.filter((_, i) => i !== index));
 };
 const saveFocusItems = async () => {
+  if (!currentUserId) return;
+
   const cleanedItems = focusItems.map((item) => item.trim()).filter(Boolean);
 
   const { error: deleteError } = await supabase
     .from("daily_focus_items")
     .delete()
-    .eq("focus_date", selectedDate);
+    .eq("focus_date", selectedDate)
+    .eq("user_id", currentUserId);
 
   if (deleteError) {
     console.error("Error clearing focus items:", deleteError);
@@ -295,6 +396,7 @@ const saveFocusItems = async () => {
   }
 
   const rows = cleanedItems.map((item, index) => ({
+    user_id: currentUserId,
     focus_date: selectedDate,
     text: item,
     sort_order: index,
@@ -312,17 +414,44 @@ const saveFocusItems = async () => {
   setFocusItems(cleanedItems);
   setIsEditingFocus(false);
 };
+
+const saveFocusItemAuto = async (value: string) => {
+  if (!currentUserId) return;
+
+  const cleaned = value.trim();
+
+  await supabase
+    .from("daily_focus_items")
+    .delete()
+    .eq("focus_date", selectedDate)
+    .eq("user_id", currentUserId);
+
+  if (!cleaned) return;
+
+  await supabase.from("daily_focus_items").insert([
+    {
+      user_id: currentUserId,
+      focus_date: selectedDate,
+      text: cleaned,
+      sort_order: 0,
+    },
+  ]);
+};
+
 const saveDayNotes = async (value: string) => {
+  if (!currentUserId) return;
+
   const { error } = await supabase
     .from("daily_day_notes")
     .upsert(
       [
         {
+          user_id: currentUserId,
           note_date: selectedDate,
           note_text: value,
         },
       ],
-      { onConflict: "note_date" }
+      { onConflict: "user_id,note_date" }
     );
 
   if (error) {
@@ -333,6 +462,7 @@ const saveDayNotes = async (value: string) => {
   setDayNotesSaved(true);
 };
  const addEvent = async () => {
+  if (!currentUserId) return;
   if (!newEventTitle.trim()) return;
   if (timeToMinutes(newEventEnd) <= timeToMinutes(newEventStart)) return;
 
@@ -340,6 +470,7 @@ const saveDayNotes = async (value: string) => {
     .from("calendar_events")
     .insert([
       {
+        user_id: currentUserId,
         title: newEventTitle,
         event_date: selectedDate,
         start_time: newEventStart,
@@ -402,6 +533,7 @@ const openEditEventModal = (eventId: string) => {
 };
 
 const saveEditedEvent = async () => {
+  if (!currentUserId) return;
   if (!editedEvent.title.trim()) return;
   if (timeToMinutes(editedEvent.end) <= timeToMinutes(editedEvent.start)) return;
 
@@ -410,6 +542,7 @@ const saveEditedEvent = async () => {
       .from("calendar_events")
       .insert([
         {
+          user_id: currentUserId,
           title: editedEvent.title,
           event_date: editedEvent.date,
           start_time: editedEvent.start,
@@ -420,7 +553,7 @@ const saveEditedEvent = async () => {
       .single();
 
     if (error) {
-      console.error("Error creating event:", error);
+      console.error("Error creating event:", JSON.stringify(error, null, 2));
       return;
     }
 
@@ -451,10 +584,11 @@ const saveEditedEvent = async () => {
       start_time: editedEvent.start,
       end_time: editedEvent.end,
     })
-    .eq("id", editingEventId);
+    .eq("id", editingEventId)
+    .eq("user_id", currentUserId);
 
   if (error) {
-    console.error("Error updating event:", error);
+    console.error("Error updating event:", JSON.stringify(error, null, 2));
     return;
   }
 
@@ -512,6 +646,7 @@ const deleteEditedEvent = async () => {
     ])
     .select()
     .single();
+   
 
   if (error) {
     console.error("Error saving company note:", error);
@@ -542,23 +677,27 @@ const saveEditedCompany = async () => {
   const currentCompany = companyList.find((company) => company.id === selectedCompanyId);
   if (!currentCompany) return;
 
-  const { data: repData } = await supabase
-    .from("sales_reps")
-    .select("id, name")
-    .eq("name", editedCompany.rep)
-    .maybeSingle();
+  const repName = editedCompany.rep.trim();
+const showName = editedCompany.show.trim();
+const statusName = editedCompany.status.trim();
 
-  const { data: showData } = await supabase
-    .from("trade_shows")
-    .select("id, name")
-    .eq("name", editedCompany.show)
-    .maybeSingle();
+const { data: repData } = await supabase
+  .from("sales_reps")
+  .select("id, name")
+  .eq("name", repName)
+  .maybeSingle();
 
-  const { data: statusData } = await supabase
-    .from("statuses")
-    .select("id, name")
-    .eq("name", editedCompany.status)
-    .maybeSingle();
+const { data: showData } = await supabase
+  .from("trade_shows")
+  .select("id, name")
+  .eq("name", showName)
+  .maybeSingle();
+
+const { data: statusData } = await supabase
+  .from("statuses")
+  .select("id, name")
+  .eq("name", statusName)
+  .maybeSingle();
 
   const { data, error } = await supabase
     .from("companies")
@@ -583,9 +722,11 @@ const saveEditedCompany = async () => {
       website,
       address,
       latest_note,
-      sales_reps(name),
-      trade_shows(name),
-      statuses(name)
+      created_at,
+last_contacted_at,
+      sales_reps:sales_rep_id(name),
+trade_shows:trade_show_id(name),
+statuses:status_id(name)
     `)
     .single();
 
@@ -605,6 +746,64 @@ const saveEditedCompany = async () => {
   setSelectedCompanyId(formattedCompany.id);
   setEditModalOpen(false);
   setIsEditingCompany(false);
+};
+const updateCompanyStatus = async (companyId: string, nextStatus: string) => {
+  if (isUpdatingStatus) return;
+
+  setIsUpdatingStatus(true);
+
+  const { data: statusData, error: statusLookupError } = await supabase
+    .from("statuses")
+    .select("id, name")
+    .eq("name", nextStatus)
+    .maybeSingle();
+
+  if (statusLookupError || !statusData) {
+    console.error("Error finding status:", statusLookupError);
+    setIsUpdatingStatus(false);
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from("companies")
+    .update({
+      status_id: statusData.id,
+    })
+    .eq("id", companyId)
+    .select(`
+      id,
+      company_name,
+      contact_name,
+      email,
+      phone,
+      website,
+      address,
+      latest_note,
+      created_at,
+last_contacted_at,
+      sales_reps:sales_rep_id(name),
+trade_shows:trade_show_id(name),
+statuses:status_id(name)
+    `)
+    .single();
+
+  if (error) {
+    console.error("Error updating company status:", error);
+    setIsUpdatingStatus(false);
+    return;
+  }
+
+  const formattedCompany = mapCompanyRow(data);
+
+  setCompanyList((prev) =>
+    prev.map((company) =>
+      company.id === formattedCompany.id ? formattedCompany : company
+    )
+  );
+
+  setStatusMenuOpenId(null);
+  setStatusMenuPosition(null);
+  setIsUpdatingStatus(false);
 };
 const normalizeMatchValue = (value: string | null | undefined) =>
   (value || "").trim().toLowerCase();
@@ -679,7 +878,17 @@ const deleteCompany = async (companyId: string) => {
 };
 
 const saveNewCompany = async () => {
-  if (!newCompany.company.trim()) return;
+  if (!newCompany.company.trim()) {
+  setCompanyNameError("Company name needed.");
+  return;
+}
+
+setCompanyNameError("");
+
+  if (!currentTeamId) {
+    alert("No team found for this user. Please log out and log back in.");
+    return;
+  }
 
   const existingCompany = findExistingCompany({
     company: newCompany.company,
@@ -688,10 +897,14 @@ const saveNewCompany = async () => {
     website: newCompany.website,
   });
 
-  const { data: repData } = await supabase
+  const repName = newCompany.rep.trim();
+const showName = newCompany.show.trim();
+const statusName = newCompany.status.trim();
+
+const { data: repData } = await supabase
   .from("sales_reps")
   .select("id, name")
-  .eq("name", newCompany.rep)
+  .eq("name", repName)
   .maybeSingle();
 
   let resolvedShowName = newCompany.show;
@@ -718,7 +931,7 @@ if (newCompany.show === "__ADD_NEW__") {
   } else {
     const { data: insertedShow, error: insertShowError } = await supabase
       .from("trade_shows")
-      .insert([{ name: trimmedCustomShow }])
+      .insert([{ name: trimmedCustomShow, team_id: currentTeamId }])
       .select("id, name")
       .single();
 
@@ -733,7 +946,7 @@ if (newCompany.show === "__ADD_NEW__") {
   const { data: existingShow } = await supabase
     .from("trade_shows")
     .select("id, name")
-    .eq("name", newCompany.show)
+    .eq("name", showName)
     .maybeSingle();
 
   showData = existingShow;
@@ -742,7 +955,7 @@ if (newCompany.show === "__ADD_NEW__") {
   const { data: statusData } = await supabase
     .from("statuses")
     .select("id, name")
-    .eq("name", newCompany.status)
+    .eq("name", statusName)
     .maybeSingle();
 
   if (existingCompany) {
@@ -755,6 +968,7 @@ if (newCompany.show === "__ADD_NEW__") {
     const { data, error } = await supabase
       .from("companies")
       .update({
+        team_id: currentTeamId,
         company_name: newCompany.company,
         contact_name: newCompany.contact || null,
         email: newCompany.email || null,
@@ -776,9 +990,11 @@ if (newCompany.show === "__ADD_NEW__") {
         website,
         address,
         latest_note,
-        sales_reps(name),
-        trade_shows(name),
-        statuses(name)
+        created_at,
+last_contacted_at,
+        sales_reps:sales_rep_id(name),
+trade_shows:trade_show_id(name),
+statuses:status_id(name)
       `)
       .single();
 
@@ -825,6 +1041,7 @@ setCustomTradeShow("");
     .from("companies")
     .insert([
       {
+        team_id: currentTeamId,
         company_name: newCompany.company,
         contact_name: newCompany.contact || null,
         email: newCompany.email || null,
@@ -846,9 +1063,11 @@ setCustomTradeShow("");
       website,
       address,
       latest_note,
-      sales_reps(name),
-      trade_shows(name),
-      statuses(name)
+      created_at,
+last_contacted_at,
+      sales_reps:sales_rep_id(name),
+trade_shows:trade_show_id(name),
+statuses:status_id(name)
     `)
     .single();
 
@@ -1070,9 +1289,11 @@ const handleImportSheet = async () => {
           website,
           address,
           latest_note,
-          sales_reps(name),
-          trade_shows(name),
-          statuses(name)
+          created_at,
+last_contacted_at,
+          sales_reps:sales_rep_id(name),
+trade_shows:trade_show_id(name),
+statuses:status_id(name)
         `)
         .single();
 
@@ -1117,9 +1338,11 @@ const handleImportSheet = async () => {
         website,
         address,
         latest_note,
-        sales_reps(name),
-        trade_shows(name),
-        statuses(name)
+        created_at,
+last_contacted_at,
+        sales_reps:sales_rep_id(name),
+trade_shows:trade_show_id(name),
+statuses:status_id(name)
       `)
       .single();
 
@@ -1155,6 +1378,45 @@ const changeDay = (direction: number) => {
   current.setDate(current.getDate() + direction);
   setSelectedDate(current.toISOString().split("T")[0]);
 };
+useEffect(() => {
+  if (!statusMenuOpenId) return;
+
+  const handleOutsideClick = () => {
+    setStatusMenuOpenId(null);
+    setStatusMenuPosition(null);
+  };
+
+  document.addEventListener("click", handleOutsideClick);
+  return () => document.removeEventListener("click", handleOutsideClick);
+}, [statusMenuOpenId]);
+
+useEffect(() => {
+  const loadFilterOptions = async () => {
+    const { data: tradeShowsData, error: tradeShowsError } = await supabase
+      .from("trade_shows")
+      .select("name")
+      .order("name", { ascending: true });
+
+    if (tradeShowsError) {
+      console.error("Error loading trade shows:", tradeShowsError);
+    } else {
+      setTradeShowOptions((tradeShowsData || []).map((item) => item.name));
+    }
+
+    const { data: repsData, error: repsError } = await supabase
+      .from("sales_reps")
+      .select("name")
+      .order("name", { ascending: true });
+
+    if (repsError) {
+      console.error("Error loading sales reps:", repsError);
+    } else {
+      setRepOptions((repsData || []).map((item) => item.name));
+    }
+  };
+
+  loadFilterOptions();
+}, []);
 
 const formattedSelectedDate = new Date(`${selectedDate}T12:00:00`).toLocaleDateString("en-US", {
   weekday: "short",
@@ -1194,25 +1456,27 @@ const handleCalendarGridClick = (e: React.MouseEvent<HTMLDivElement>) => {
 useEffect(() => {
   const loadCompanies = async () => {
     const { data, error } = await supabase
-      .from("companies")
-      .select(`
-        id,
-        company_name,
-        contact_name,
-        email,
-        phone,
-        website,
-        address,
-        latest_note,
-        sales_reps(name),
-        trade_shows(name),
-        statuses(name)
-      `);
+  .from("companies")
+  .select(`
+    id,
+    company_name,
+    contact_name,
+    email,
+    phone,
+    website,
+    address,
+    latest_note,
+    created_at,
+    last_contacted_at,
+    sales_reps:sales_rep_id(name),
+    trade_shows:trade_show_id(name),
+    statuses:status_id(name)
+  `);
 
     if (error) {
-      console.error("Error loading companies:", error);
-      return;
-    }
+  console.error("Error loading companies:", JSON.stringify(error, null, 2));
+  return;
+}
 
     const formattedCompanies: Company[] = (data || []).map((company: any) =>
   mapCompanyRow(company)
@@ -1223,6 +1487,34 @@ useEffect(() => {
 
   loadCompanies();
 }, []);
+
+useEffect(() => {
+  const loadCurrentTeam = async () => {
+    const { data: userData } = await supabase.auth.getUser();
+    const userId = userData.user?.id;
+
+if (!userId) return;
+
+setCurrentUserId(userId);
+
+    const { data, error } = await supabase
+      .from("team_members")
+      .select("team_id")
+      .eq("user_id", userId)
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Error loading team:", error);
+      return;
+    }
+
+    setCurrentTeamId(data?.team_id || null);
+  };
+
+  loadCurrentTeam();
+}, []);
+
 useEffect(() => {
   const loadCompanyNotes = async () => {
     const { data, error } = await supabase
@@ -1262,9 +1554,12 @@ groupedNotes[note.company_id].push({
 }, []);
 useEffect(() => {
   const loadEvents = async () => {
+    if (!currentUserId) return;
+
     const { data, error } = await supabase
       .from("calendar_events")
-      .select("*");
+      .select("*")
+      .eq("user_id", currentUserId);
 
     if (error) {
       console.error("Error loading events:", error);
@@ -1283,13 +1578,16 @@ useEffect(() => {
   };
 
   loadEvents();
-}, []);
+}, [currentUserId]);
 useEffect(() => {
   const loadFocusItems = async () => {
+    if (!currentUserId) return;
+
     const { data, error } = await supabase
       .from("daily_focus_items")
       .select("*")
       .eq("focus_date", selectedDate)
+      .eq("user_id", currentUserId)
       .order("sort_order", { ascending: true });
 
     if (error) {
@@ -1301,13 +1599,16 @@ useEffect(() => {
   };
 
   loadFocusItems();
-}, [selectedDate]);
+}, [selectedDate, currentUserId]);
 useEffect(() => {
   const loadDayNotes = async () => {
+    if (!currentUserId) return;
+
     const { data, error } = await supabase
       .from("daily_day_notes")
       .select("note_text")
       .eq("note_date", selectedDate)
+      .eq("user_id", currentUserId)
       .maybeSingle();
 
     if (error) {
@@ -1320,9 +1621,10 @@ useEffect(() => {
   };
 
   loadDayNotes();
-}, [selectedDate]);
+}, [selectedDate, currentUserId]);
 useEffect(() => {
   if (dayNotesAutosaveTimeout.current) {
+    
     clearTimeout(dayNotesAutosaveTimeout.current);
   }
 
@@ -1339,6 +1641,98 @@ useEffect(() => {
   };
 }, [dayNotes, selectedDate]);
   const timelineHours = Array.from({ length: 11 }, (_, i) => 8 + i);
+
+  const deleteTradeShow = async (showName: string) => {
+  const confirmed = window.confirm(`Delete "${showName}"?`);
+  if (!confirmed) return;
+
+  const { error } = await supabase
+    .from("trade_shows")
+    .delete()
+    .eq("name", showName);
+
+  if (error) {
+    console.error("Error deleting trade show:", error);
+    alert("Could not delete this trade show.");
+    return;
+  }
+
+  setTradeShowOptions((prev) => prev.filter((name) => name !== showName));
+};
+
+const saveTradeShowEdit = async () => {
+  if (!editingTradeShowName || !editingTradeShowValue.trim()) return;
+
+  const { error } = await supabase
+    .from("trade_shows")
+    .update({ name: editingTradeShowValue.trim() })
+    .eq("name", editingTradeShowName);
+
+  if (error) {
+    console.error("Error updating trade show:", error);
+    alert("Could not update this trade show.");
+    return;
+  }
+
+  setTradeShowOptions((prev) =>
+    prev.map((name) =>
+      name === editingTradeShowName ? editingTradeShowValue.trim() : name
+    )
+  );
+
+  setEditingTradeShowName("");
+  setEditingTradeShowValue("");
+};
+
+const addManagedTradeShow = async () => {
+  const trimmedName = newTradeShowName.trim();
+  if (!trimmedName) return;
+
+  if (!currentTeamId) {
+    alert("No team found. Please log out and log back in.");
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from("trade_shows")
+    .insert([{ name: trimmedName, team_id: currentTeamId }])
+    .select("name")
+    .single();
+
+  if (error) {
+    console.error("Error adding trade show:", error);
+    alert("Could not add this trade show.");
+    return;
+  }
+
+  setTradeShowOptions((prev) =>
+    Array.from(new Set([...prev, data.name])).sort()
+  );
+
+  setNewTradeShowName("");
+};
+
+     const resizeTextarea = (
+  textarea: HTMLTextAreaElement | null,
+  minHeight: number
+) => {
+  if (!textarea) return;
+
+  textarea.style.height = `${minHeight}px`;
+
+  if (textarea.scrollHeight > minHeight) {
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }
+};
+
+useEffect(() => {
+  requestAnimationFrame(() => {
+    resizeTextarea(focusTextareaRef.current, 190);
+    resizeTextarea(dayNotesTextareaRef.current, 150);
+  });
+}, [selectedDate, focusItems, dayNotes]);
+
+
 
   return (
   <>
@@ -1363,7 +1757,7 @@ useEffect(() => {
 
   <button
     onClick={() => setAddModalOpen(true)}
-    className="rounded-2xl bg-gradient-to-r from-teal-400 to-blue-500 px-4 py-3 text-sm font-medium text-white hover:opacity-90"
+    className="rounded-2xl border border-[#4ade80] bg-[#4ade80] px-4 py-3 text-sm font-medium text-white transition hover:opacity-90"
   >
     Add Company
   </button>
@@ -1382,13 +1776,138 @@ useEffect(() => {
   await prepareImportSheet(file);
 }}
 />
-
+<button
+  onClick={() => setManageTradeShowsOpen(true)}
+  style={{
+    backgroundColor: "#3b82f6",
+    borderColor: "#3b82f6",
+  }}
+  className="rounded-2xl border px-4 py-3 text-sm font-medium text-white transition hover:opacity-90"
+>
+  Manage Trade Shows
+</button>
   <button
     onClick={() => importFileRef.current?.click()}
     className="rounded-2xl border border-gray-300 bg-[#f8f8f8] px-4 py-3 text-sm font-medium text-gray-700 hover:bg-white"
   >
     Import Sheet
   </button>
+  {manageTradeShowsOpen && (
+  <div
+    className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/40 px-4"
+    onClick={() => {
+      setManageTradeShowsOpen(false);
+      setEditingTradeShowName("");
+      setEditingTradeShowValue("");
+      setNewTradeShowName("");
+    }}
+  >
+    <div
+      className="w-full max-w-xl rounded-3xl bg-white p-6 shadow-2xl"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h3 className="text-2xl font-bold text-gray-900">
+            Manage Trade Shows
+          </h3>
+          <p className="mt-1 text-sm text-gray-500">
+            Add, edit, or remove trade shows used in your pipeline.
+          </p>
+        </div>
+
+        <button
+          onClick={() => {
+            setManageTradeShowsOpen(false);
+            setEditingTradeShowName("");
+            setEditingTradeShowValue("");
+            setNewTradeShowName("");
+          }}
+          className="rounded-xl px-3 py-2 text-xl text-gray-500 hover:bg-gray-100"
+        >
+          ×
+        </button>
+      </div>
+
+      <div className="mt-5 rounded-2xl border border-gray-200 bg-gray-50 p-4">
+        <p className="mb-2 text-sm font-semibold text-gray-700">
+          Add New Trade Show
+        </p>
+
+        <div className="flex gap-2">
+          <input
+            value={newTradeShowName}
+            onChange={(e) => setNewTradeShowName(e.target.value)}
+            placeholder="Enter trade show name"
+            className="flex-1 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm outline-none"
+          />
+
+          <button
+            onClick={addManagedTradeShow}
+            className="rounded-xl border border-green-200 bg-green-50 px-4 py-2 text-sm font-semibold text-green-700 hover:bg-green-100"
+          >
+            Add
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-5 max-h-[360px] space-y-3 overflow-y-auto pr-1">
+        {tradeShowOptions.length === 0 ? (
+          <p className="rounded-2xl bg-gray-50 p-4 text-sm text-gray-500">
+            No trade shows found.
+          </p>
+        ) : (
+          tradeShowOptions.map((show) => (
+            <div
+              key={show}
+              className="flex items-center justify-between gap-3 rounded-2xl border border-gray-200 bg-white p-3 shadow-sm"
+            >
+              {editingTradeShowName === show ? (
+                <input
+                  value={editingTradeShowValue}
+                  onChange={(e) => setEditingTradeShowValue(e.target.value)}
+                  className="flex-1 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm outline-none"
+                />
+              ) : (
+                <span className="text-sm font-semibold text-gray-800">
+                  {show}
+                </span>
+              )}
+
+              <div className="flex items-center gap-2">
+                {editingTradeShowName === show ? (
+                  <button
+                    onClick={saveTradeShowEdit}
+                    className="rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-sm font-semibold text-green-700 hover:bg-green-100"
+                  >
+                    Save
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => {
+                      setEditingTradeShowName(show);
+                      setEditingTradeShowValue(show);
+                    }}
+                    className="rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                  >
+                    Edit
+                  </button>
+                )}
+
+                <button
+                  onClick={() => deleteTradeShow(show)}
+                  className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-100"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  </div>
+)}
 </>
 </div>
             </div>
@@ -1417,10 +1936,15 @@ useEffect(() => {
                   }}
                   className="h-12 rounded-2xl border border-gray-300 bg-[#f8f8f8] px-4 text-sm text-gray-700 outline-none"
                 >
-                  {availableTradeShows.map((show) => (
-                    <option key={show}>{show}</option>
-                  ))}
-                  <option>All Shows</option>
+                  <option value="TRADESHOW">TRADESHOW</option>
+
+{availableTradeShows.map((show) => (
+  <option key={show} value={show}>
+    {show}
+  </option>
+))}
+
+<option value="All Shows">All Shows</option>
                 </select>
 
                 <select
@@ -1432,13 +1956,15 @@ useEffect(() => {
                   }}
                   className="h-12 rounded-2xl border border-gray-300 bg-[#f8f8f8] px-4 text-sm text-gray-700 outline-none"
                 >
-                  <option>William</option>
-                  <option>Evan</option>
-                  <option>Dalin</option>
-                  <option>Yana</option>
-                  <option>Jon</option>
-                  <option>Prince</option>
-                  <option>All Reps</option>
+                  <option value="SALES REP">SALES REP</option>
+
+{repOptions.map((rep) => (
+  <option key={rep} value={rep}>
+    {rep}
+  </option>
+))}
+
+<option value="All Reps">All Reps</option>
                 </select>
 
                 <select
@@ -1446,11 +1972,12 @@ useEffect(() => {
                   onChange={(e) => setSelectedStatus(e.target.value)}
                   className="h-12 rounded-2xl border border-gray-300 bg-[#f8f8f8] px-4 text-sm text-gray-700 outline-none"
                 >
-                  <option>All Statuses</option>
-                  <option>WIP</option>
-                  <option>Company call done</option>
-                  <option>YES</option>
-                  <option>None</option>
+                  <option value="STATUS">STATUS</option>
+<option value="All Statuses">All Statuses</option>
+<option value="WIP">WIP</option>
+<option value="Company call done">Company call done</option>
+<option value="YES">YES</option>
+<option value="None">None</option>
                 </select>
               </div>
             </div>
@@ -1525,62 +2052,31 @@ useEffect(() => {
     </div>
 
     <div className="rounded-3xl border border-gray-200 bg-[#f7f7f8] p-5 shadow-sm">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-2xl font-semibold">Today&apos;s Focus</h3>
+  <h3 className="text-center text-2xl font-semibold">Today&apos;s Focus</h3>
 
-  <div className="flex items-center gap-2">
-    {isEditingFocus && (
-      <button
-        onClick={saveFocusItems}
-        className="rounded-xl bg-gradient-to-r from-teal-400 to-blue-500 px-3 py-2 text-sm font-medium text-white hover:opacity-90"
-      >
-        Save
-      </button>
-    )}
+  <textarea
+  ref={focusTextareaRef}
+  value={focusItems[0] || ""}
+  onChange={(e) => {
+    const value = e.target.value;
+    setFocusItems([value]);
 
-    <button
-      onClick={() => setIsEditingFocus(!isEditingFocus)}
-      className="rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-    >
-      Edit
-    </button>
-  </div>
+    e.target.style.height = "auto";
+    e.target.style.height = `${e.target.scrollHeight}px`;
+
+    if (focusAutosaveTimeout.current) {
+      clearTimeout(focusAutosaveTimeout.current);
+    }
+
+    focusAutosaveTimeout.current = setTimeout(() => {
+      saveFocusItemAuto(value);
+    }, 800);
+  }}
+  placeholder="What’s the main focus today?"
+  className="mt-4 min-h-[190px] w-full resize-none overflow-hidden rounded-2xl border border-gray-300 bg-white px-4 py-4 text-left text-sm text-gray-700 outline-none"
+  rows={6}
+/>
 </div>
-
-                <div className="mt-4 space-y-3">
-                  {focusItems.map((item, index) =>
-                    isEditingFocus ? (
-                      <div key={index} className="space-y-2">
-                        <textarea
-                          value={item}
-                          onChange={(e) => updateFocusItem(index, e.target.value)}
-                          className="w-full resize-none rounded-2xl border border-gray-300 bg-[#dfe7f3] px-4 py-4 text-sm text-gray-700 outline-none"
-                          rows={2}
-                        />
-                        <button
-                          onClick={() => removeFocusItem(index)}
-                          className="text-sm font-medium text-red-500 hover:underline"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ) : (
-                      <div key={index} className="rounded-2xl bg-[#dfe7f3] px-4 py-4 text-sm text-gray-700">
-                        {item}
-                      </div>
-                    )
-                  )}
-
-                  {isEditingFocus && (
-                    <button
-                      onClick={addFocusItem}
-                      className="w-full rounded-2xl border border-dashed border-gray-300 bg-white px-4 py-3 text-sm font-medium text-teal-600 hover:bg-gray-50"
-                    >
-                      + Add Focus Item
-                    </button>
-                  )}
-                </div>
-              </div>
                         </div>
 
             <div className="mt-5 flex items-center justify-end">
@@ -1605,7 +2101,7 @@ useEffect(() => {
   <tr>
   <th className="w-[23%] px-5 py-4 font-semibold">Company</th>
   <th className="w-[15%] px-5 py-4 font-semibold">Contact</th>
-  <th className="w-[11%] px-5 py-4 font-semibold">Status</th>
+  <th className="w-[11%] px-5 py-4 text-center font-semibold">Status</th>
   <th className="w-[24%] px-5 py-4 font-semibold">Email / Phone</th>
   <th className="w-[15%] px-5 py-4 font-semibold">Website</th>
   <th className="w-[12%] px-4 py-4 font-semibold text-center">Actions</th>
@@ -1621,6 +2117,12 @@ useEffect(() => {
   if (openMenuId) {
     setOpenMenuId(null);
     setMenuPosition(null);
+    return;
+  }
+
+  if (statusMenuOpenId) {
+    setStatusMenuOpenId(null);
+    setStatusMenuPosition(null);
     return;
   }
 
@@ -1645,11 +2147,63 @@ useEffect(() => {
   </div>
 </td>
                         <td className="px-5 py-4 font-medium">{company.contact || "—"}</td>
-                        <td className="px-5 py-4">
-                          <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusClass(company.status)}`}>
-                            {company.status}
-                          </span>
-                        </td>
+                        <td className="px-5 py-4 relative">
+  <button
+    onClick={(e) => {
+      e.stopPropagation();
+
+      if (statusMenuOpenId === company.id) {
+        setStatusMenuOpenId(null);
+        setStatusMenuPosition(null);
+        return;
+      }
+
+      const rect = e.currentTarget.getBoundingClientRect();
+
+      setStatusMenuOpenId(company.id);
+      setStatusMenuPosition({
+        top: rect.bottom + 10,
+        left: rect.left,
+        width: rect.width,
+      });
+    }}
+    className={`inline-flex min-w-[148px] items-center justify-center rounded-full px-4 py-2 text-center text-xs font-semibold leading-none shadow-sm transition duration-150 hover:scale-[1.02] hover:shadow ${statusClass(company.status)}`}
+  >
+    {company.status}
+  </button>
+
+  {statusMenuOpenId === company.id && statusMenuPosition && (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        position: "fixed",
+        top: statusMenuPosition.top,
+        left: statusMenuPosition.left,
+        width: statusMenuPosition.width,
+      }}
+      className="z-[100000] overflow-hidden rounded-[24px] border border-gray-200 bg-white p-2 shadow-[0_24px_60px_rgba(15,23,42,0.18)]"
+    >
+      {STATUS_OPTIONS.map((status) => (
+  <button
+    key={status}
+    onClick={() => updateCompanyStatus(company.id, status)}
+    className={`relative flex w-full items-center justify-center rounded-full px-5 py-3 text-center text-sm transition ${
+      company.status === status
+        ? "bg-[#2F80ED] font-semibold text-white"
+        : "text-gray-700 hover:bg-[#eff6ff] hover:text-[#2F80ED]"
+    }`}
+  >
+    {company.status === status && (
+      <span className="absolute left-0 top-1/2 -translate-y-1/2 text-white">
+        
+      </span>
+    )}
+    <span className="whitespace-nowrap">{status}</span>
+  </button>
+))}
+    </div>
+  )}
+</td>
                         <td className="px-5 py-4 text-gray-600">
                           {company.email || "—"}
                           <br />
@@ -1733,118 +2287,122 @@ useEffect(() => {
   </div>
 </td>
 
-{openMenuId === company.id && menuPosition && (
-  <div
-    onClick={(e) => e.stopPropagation()}
-    style={{
-      position: "fixed",
-      top: menuPosition.top,
-      right: menuPosition.right,
-    }}
-    className="z-[99999] w-fit overflow-hidden rounded-2xl border border-[#122026] bg-[#071214] text-white shadow-[0_20px_60px_rgba(0,0,0,0.45)]"
-  >
-    <button
-      onClick={() => handleViewDetails(company.id)}
-      className="flex w-full items-center gap-3 border-b border-white/10 px-4 py-3 text-left text-[15px] transition hover:bg-gradient-to-r hover:from-[#0d3b42] hover:to-[#0c2f57]"
-    >
-      <span className="flex h-5 w-5 shrink-0 items-center justify-center text-white/95">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-          <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
-          <circle cx="12" cy="12" r="3" />
-        </svg>
-      </span>
-      <span className="leading-none">View Details</span>
-    </button>
-
-    <button
-      onClick={() => handleMockAction("call", company.id)}
-      className="flex w-full items-center gap-3 border-b border-white/10 px-4 py-3 text-left text-[15px] transition hover:bg-gradient-to-r hover:from-[#0d3b42] hover:to-[#0c2f57]"
-    >
-      <span className="flex h-5 w-5 shrink-0 items-center justify-center text-white/95">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-          <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.08 4.18 2 2 0 0 1 4.06 2h3a2 2 0 0 1 2 1.72c.12.9.33 1.77.63 2.61a2 2 0 0 1-.45 2.11L8 9.91a16 16 0 0 0 6.09 6.09l1.47-1.24a2 2 0 0 1 2.11-.45c.84.3 1.71.51 2.61.63A2 2 0 0 1 22 16.92Z" />
-        </svg>
-      </span>
-      <span className="leading-none">Log Call</span>
-    </button>
-
-    <button
-      onClick={() => handleMockAction("email", company.id)}
-      className="flex w-full items-center gap-3 border-b border-white/10 px-4 py-3 text-left text-[15px] transition hover:bg-gradient-to-r hover:from-[#0d3b42] hover:to-[#0c2f57]"
-    >
-      <span className="flex h-5 w-5 shrink-0 items-center justify-center text-white/95">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-          <rect x="3" y="5" width="18" height="14" rx="2" />
-          <path d="m4 7 8 6 8-6" />
-        </svg>
-      </span>
-      <span className="leading-none">Log Email</span>
-    </button>
-
-    <button
-      className="flex w-full items-center gap-3 border-b border-white/10 px-4 py-3 text-left text-[15px] transition hover:bg-gradient-to-r hover:from-[#0d3b42] hover:to-[#0c2f57]"
-    >
-      <span className="flex h-5 w-5 shrink-0 items-center justify-center text-white/95">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
-          <path d="M14 2v6h6" />
-          <path d="M9 15h6" />
-          <path d="M9 11h3" />
-          <path d="M9 19h6" />
-        </svg>
-      </span>
-      <span className="leading-none">View Sheets</span>
-    </button>
-
-    <button
-      onClick={() => {
-        setSelectedCompanyId(company.id);
-        setEditedCompany({
-          company: company.company || "",
-          show: company.show || "",
-          rep: company.rep || "",
-          contact: company.contact || "",
-          email: company.email || "",
-          phone: company.phone || "",
-          website: company.website || "",
-          address: company.address || "",
-          status: company.status || "None",
-        });
-        setOpenMenuId(null);
-        setMenuPosition(null);
-        setDetailsOpen(false);
-        setTimeout(() => {
-          setEditModalOpen(true);
-        }, 50);
+{openMenuId === company.id &&
+  menuPosition &&
+  typeof document !== "undefined" &&
+  createPortal(
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        position: "fixed",
+        top: menuPosition.top,
+        right: menuPosition.right,
       }}
-      className="flex w-full items-center gap-3 border-b border-white/10 px-4 py-3 text-left text-[15px] transition hover:bg-gradient-to-r hover:from-[#0d3b42] hover:to-[#0c2f57]"
+      className="z-[9999999] w-fit overflow-hidden rounded-2xl border border-[#122026] bg-[#071214] text-white shadow-[0_20px_60px_rgba(0,0,0,0.45)]"
     >
-      <span className="flex h-5 w-5 shrink-0 items-center justify-center text-white/95">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-          <path d="M12 20h9" />
-          <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" />
-        </svg>
-      </span>
-      <span className="leading-none">Edit</span>
-    </button>
+      <button
+        onClick={() => handleViewDetails(company.id)}
+        className="flex w-full items-center gap-3 border-b border-white/10 px-4 py-3 text-left text-[15px] transition hover:bg-gradient-to-r hover:from-[#0d3b42] hover:to-[#0c2f57]"
+      >
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center text-white/95">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+            <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+        </span>
+        <span className="leading-none">View Details</span>
+      </button>
 
-    <button
-      onClick={() => deleteCompany(company.id)}
-      className="flex w-full items-center gap-3 px-4 py-3 text-left text-[15px] text-red-400 transition hover:bg-gradient-to-r hover:from-[#0d3b42] hover:to-[#0c2f57]"
-    >
-      <span className="flex h-5 w-5 shrink-0 items-center justify-center text-red-400">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-          <path d="M3 6h18" />
-          <path d="M8 6V4h8v2" />
-          <path d="M19 6l-1 14H6L5 6" />
-          <path d="M10 11v6" />
-          <path d="M14 11v6" />
-        </svg>
-      </span>
-      <span className="leading-none">Delete</span>
-    </button>
-  </div>
-)}
+      <button
+        onClick={() => handleMockAction("call", company.id)}
+        className="flex w-full items-center gap-3 border-b border-white/10 px-4 py-3 text-left text-[15px] transition hover:bg-gradient-to-r hover:from-[#0d3b42] hover:to-[#0c2f57]"
+      >
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center text-white/95">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.08 4.18 2 2 0 0 1 4.06 2h3a2 2 0 0 1 2 1.72c.12.9.33 1.77.63 2.61a2 2 0 0 1-.45 2.11L8 9.91a16 16 0 0 0 6.09 6.09l1.47-1.24a2 2 0 0 1 2.11-.45c.84.3 1.71.51 2.61.63A2 2 0 0 1 22 16.92Z" />
+          </svg>
+        </span>
+        <span className="leading-none">Log Call</span>
+      </button>
+
+      <button
+        onClick={() => handleMockAction("email", company.id)}
+        className="flex w-full items-center gap-3 border-b border-white/10 px-4 py-3 text-left text-[15px] transition hover:bg-gradient-to-r hover:from-[#0d3b42] hover:to-[#0c2f57]"
+      >
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center text-white/95">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+            <rect x="3" y="5" width="18" height="14" rx="2" />
+            <path d="m4 7 8 6 8-6" />
+          </svg>
+        </span>
+        <span className="leading-none">Log Email</span>
+      </button>
+
+      <button
+        className="flex w-full items-center gap-3 border-b border-white/10 px-4 py-3 text-left text-[15px] transition hover:bg-gradient-to-r hover:from-[#0d3b42] hover:to-[#0c2f57]"
+      >
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center text-white/95">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+            <path d="M14 2v6h6" />
+            <path d="M9 15h6" />
+            <path d="M9 11h3" />
+            <path d="M9 19h6" />
+          </svg>
+        </span>
+        <span className="leading-none">View Sheets</span>
+      </button>
+
+      <button
+        onClick={() => {
+          setSelectedCompanyId(company.id);
+          setEditedCompany({
+            company: company.company || "",
+            show: company.show || "",
+            rep: company.rep || "",
+            contact: company.contact || "",
+            email: company.email || "",
+            phone: company.phone || "",
+            website: company.website || "",
+            address: company.address || "",
+            status: company.status || "None",
+          });
+          setOpenMenuId(null);
+          setMenuPosition(null);
+          setDetailsOpen(false);
+          setTimeout(() => {
+            setEditModalOpen(true);
+          }, 50);
+        }}
+        className="flex w-full items-center gap-3 border-b border-white/10 px-4 py-3 text-left text-[15px] transition hover:bg-gradient-to-r hover:from-[#0d3b42] hover:to-[#0c2f57]"
+      >
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center text-white/95">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+            <path d="M12 20h9" />
+            <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" />
+          </svg>
+        </span>
+        <span className="leading-none">Edit</span>
+      </button>
+
+      <button
+        onClick={() => deleteCompany(company.id)}
+        className="flex w-full items-center gap-3 px-4 py-3 text-left text-[15px] text-red-400 transition hover:bg-gradient-to-r hover:from-[#0d3b42] hover:to-[#0c2f57]"
+      >
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center text-red-400">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+            <path d="M3 6h18" />
+            <path d="M8 6V4h8v2" />
+            <path d="M19 6l-1 14H6L5 6" />
+            <path d="M10 11v6" />
+            <path d="M14 11v6" />
+          </svg>
+        </span>
+        <span className="leading-none">Delete</span>
+      </button>
+    </div>,
+    document.body
+  )}
 
                       </tr>
                     ))}
@@ -1995,18 +2553,23 @@ const width = 100 / overlapping.length;
                 </div>
               </div>
 
-              <div className="rounded-3xl border border-gray-200 bg-[#f7f7f8] p-5 shadow-sm">
-                <h3 className="text-3xl font-semibold">Important Day Notes</h3>
-                <div className="mt-5 rounded-2xl border border-gray-300 bg-white p-4">
-                  <textarea
+             <div className="rounded-3xl border border-gray-200 bg-[#f7f7f8] p-5 shadow-sm">
+  <h3 className="text-3xl font-semibold">Important Day Notes</h3>
+
+  <textarea
+  ref={dayNotesTextareaRef}
   value={dayNotes}
-  onChange={(e) => setDayNotes(e.target.value)}
+  onChange={(e) => {
+    setDayNotes(e.target.value);
+
+    e.target.style.height = "auto";
+    e.target.style.height = `${e.target.scrollHeight}px`;
+  }}
   placeholder="Insert questions/notes that you have for the day"
-  className="w-full resize-none rounded-2xl border border-gray-300 bg-[#dfe7f3] px-4 py-4 text-sm text-gray-700 outline-none placeholder:text-gray-400"
-  rows={5}
+  className="mt-5 min-h-[240px] w-full resize-none overflow-hidden rounded-2xl border border-gray-300 bg-white px-4 py-4 text-sm text-gray-700 outline-none placeholder:text-gray-400"
+  rows={8}
 />
-                </div>
-              </div>
+</div>
             </div>
           </div>
         </section>
@@ -2018,14 +2581,14 @@ const width = 100 / overlapping.length;
         setDetailsOpen(false);
         setIsEditingCompany(false);
       }}
-      className="fixed inset-0 z-40 bg-black/30"
+      className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[1px]"
     />
 
-    <aside className="fixed inset-y-0 right-0 z-50 w-[430px] bg-[#071214] text-white shadow-2xl">
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="h-full overflow-y-auto border-l border-white/10 px-6 py-6"
-      >
+    <aside className="fixed inset-y-0 right-0 z-50 w-[590px] bg-white text-[#111827] shadow-2xl">
+  <div
+    onClick={(e) => e.stopPropagation()}
+    className="h-full overflow-y-auto border-l border-gray-200 px-6 py-6"
+  >
               <div className="flex items-start justify-between">
                 <div>
                   <h3 className="text-3xl font-bold">{selectedCompany.company}</h3>
@@ -2038,105 +2601,310 @@ const width = 100 / overlapping.length;
     setDetailsOpen(false);
     setIsEditingCompany(false);
   }}
-  className="cursor-pointer text-3xl text-white/60 transition hover:text-white"
+  className="cursor-pointer text-3xl text-gray-400 transition hover:text-gray-700"
 >
   ×
 </button>
                 </div>
               </div>
 
-              <div className="mt-3 text-right text-sm text-white/50">
-                {selectedCompany.rep}
-              </div>
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+  <div className="rounded-full border border-gray-200 bg-[#f8fafc] px-3 py-1.5 text-sm font-medium text-[#111827]">
+    Rep: {selectedCompany.rep || "—"}
+  </div>
 
-              <div className="mt-6 grid grid-cols-4 rounded-2xl bg-white/10 p-1 text-sm">
-                {(["Overview", "Notes", "Activity", "Documents"] as const).map((tab) => (
-                  <button
-                    key={tab}
-                    onClick={() => setActiveTab(tab)}
-                    className={`rounded-xl px-4 py-3 text-center ${
-                      activeTab === tab ? "bg-black/40 font-semibold" : "text-white/70"
-                    }`}
-                  >
-                    {tab}
-                  </button>
-                ))}
-              </div>
+  <div className="rounded-full border border-gray-200 bg-[#f8fafc] px-3 py-1.5 text-sm font-medium text-[#111827]">
+    Show: {selectedCompany.show || "—"}
+  </div>
+</div>
 
-              <div className="mt-5 flex gap-3">
-                <button
-                  onClick={() => handleMockAction("call", selectedCompany.id)}
-                  className="rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-medium hover:bg-white/10"
-                >
-                  Log Call
-                </button>
-                <button
-                  onClick={() => handleMockAction("email", selectedCompany.id)}
-                  className="rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-medium hover:bg-white/10"
-                >
-                  Log Email
-                </button>
-              </div>
+              <div className="mt-6 grid grid-cols-[1fr_1fr_1fr_1.3fr] gap-2 rounded-2xl bg-[#f1f5f9] p-2">
+  {(["Overview", "Notes", "Activity", "Documents"] as const).map((tab) => (
+    <button
+      key={tab}
+      onClick={() => setActiveTab(tab)}
+      className={`rounded-2xl px-3 py-3 text-sm font-semibold transition ${
+        activeTab === tab
+          ? "bg-black text-white shadow-sm"
+          : "bg-white text-gray-600 hover:bg-gray-100 hover:text-[#111827]"
+      }`}
+    >
+      {tab}
+    </button>
+  ))}
+</div>
 
-              {activeTab === "Overview" && (
-                <>
-                  <div className="mt-8">
-                    <h4 className="text-lg font-semibold">Contact Information</h4>
+              <div className="grid grid-cols-2 gap-3">
+      <button
+    onClick={() => handleMockAction("call", selectedCompany.id)}
+    className="rounded-xl bg-[#2F80ED] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#256fd0]"
+  >
+    Log Call
+  </button>
 
-                    <div className="mt-4 space-y-4 text-sm">
-                      <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-                        <p className="text-white/50">Contact</p>
-                        <p className="mt-1 font-medium">{selectedCompany.contact || "—"}</p>
-                      </div>
+  <button
+    onClick={() => handleMockAction("email", selectedCompany.id)}
+    className="rounded-xl bg-[#2F80ED] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#256fd0]"
+  >
+    Log Email
+  </button>
+</div>
 
-                      <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-                        <p className="text-white/50">Email</p>
-                        <p className="mt-1 font-medium">{selectedCompany.email || "—"}</p>
-                      </div>
 
-                      <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-                        <p className="text-white/50">Phone</p>
-                        <p className="mt-1 font-medium">{selectedCompany.phone || "—"}</p>
-                      </div>
+            {activeTab === "Overview" && (
+  <div className="mt-4 grid gap-4">
+    <div>
+      <h4 className="text-[15px] font-semibold text-gray-500">Contact Information</h4>
 
-                      <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-                        <p className="text-white/50">Website</p>
-                        <p className="mt-1 font-medium">{selectedCompany.website || "—"}</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-8">
-                    <h4 className="text-lg font-semibold">Status</h4>
-                    <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-4 text-sm">
-                      {selectedCompany.status}
-                    </div>
-                  </div>
-                </>
-              )}
-
-             {activeTab === "Notes" && (
-  <div className="mt-8">
-    <div className="space-y-4">
-      {(companyNotes[selectedCompany.id] || []).map((note, index) => (
-        <div key={index} className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm">
-          <p className="font-semibold">{note.date} · {note.type}</p>
-          <p className="mt-1 text-white/70">{note.text}</p>
+      <div className="mt-3 space-y-1.5">
+        <div className="flex items-center gap-3 text-[15px] text-[#111827] leading-6">
+          <svg
+            className="h-[20px] w-[20px] shrink-0 text-gray-400"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path d="M20 21a8 8 0 0 0-16 0" />
+            <circle cx="12" cy="7" r="4" />
+          </svg>
+          <span>{selectedCompany.contact || "—"}</span>
         </div>
-      ))}
+
+        <div className="flex items-center gap-3 text-[15px] leading-6">
+          <svg
+            className="h-[20px] w-[20px] shrink-0 text-gray-400"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <rect x="3" y="5" width="18" height="14" rx="2" />
+            <path d="m4 7 8 6 8-6" />
+          </svg>
+          {selectedCompany.email ? (
+            <a
+              href={`mailto:${selectedCompany.email}`}
+              className="break-all text-[#2F80ED] hover:underline"
+            >
+              {selectedCompany.email}
+            </a>
+          ) : (
+            <span className="text-[#111827]">—</span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-3 text-[15px] leading-6">
+          <svg
+            className="h-[20px] w-[20px] shrink-0 text-gray-400"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.08 4.18 2 2 0 0 1 4.06 2h3a2 2 0 0 1 2 1.72c.12.9.33 1.77.63 2.61a2 2 0 0 1-.45 2.11L8 9.91a16 16 0 0 0 6.09 6.09l1.47-1.24a2 2 0 0 1 2.11-.45c.84.3 1.71.51 2.61.63A2 2 0 0 1 22 16.92Z" />
+          </svg>
+          <span className="text-[#2F80ED]">{selectedCompany.phone || "—"}</span>
+        </div>
+
+        <div className="flex items-center gap-3 text-[15px] leading-6">
+          <svg
+            className="h-[20px] w-[20px] shrink-0 text-gray-400"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <rect x="3" y="4" width="18" height="12" rx="2" />
+            <path d="M8 20h8" />
+            <path d="M12 16v4" />
+          </svg>
+          {selectedCompany.website ? (
+            <a
+              href={formatWebsiteUrl(selectedCompany.website)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="break-all text-[#2F80ED] hover:underline"
+            >
+              {selectedCompany.website}
+            </a>
+          ) : (
+            <span className="text-[#111827]">—</span>
+          )}
+        </div>
+      </div>
     </div>
 
-    <div className="mt-6 rounded-xl border border-white/10 bg-white/5 p-4">
-      <p className="text-sm font-semibold text-white">Add Note</p>
+    <div>
+  <h4 className="text-[15px] font-semibold text-gray-500">Status</h4>
+
+  <div className="mt-3 relative">
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+
+        if (statusMenuOpenId === selectedCompany.id) {
+          setStatusMenuOpenId(null);
+          setStatusMenuPosition(null);
+          return;
+        }
+
+        const rect = e.currentTarget.getBoundingClientRect();
+
+        setStatusMenuOpenId(selectedCompany.id);
+        setStatusMenuPosition({
+  top: rect.bottom + 10,
+  left: rect.left,
+  width: rect.width,
+});
+      }}
+      className="flex w-full items-center justify-between rounded-[16px] border border-[#1f2a32] bg-[#071214] px-5 py-4 text-[16px] text-white transition hover:border-[#2b3d47]"
+    >
+      <span>{selectedCompany.status || "None"}</span>
+
+      <svg
+        viewBox="0 0 20 20"
+        fill="currentColor"
+        className="h-5 w-5 text-gray-400"
+      >
+        <path
+          fillRule="evenodd"
+          d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.168l3.71-3.938a.75.75 0 1 1 1.08 1.04l-4.25 4.51a.75.75 0 0 1-1.08 0l-4.25-4.51a.75.75 0 0 1 .02-1.06Z"
+          clipRule="evenodd"
+        />
+      </svg>
+    </button>
+
+    {statusMenuOpenId === selectedCompany.id && statusMenuPosition && (
+      <div
+  onClick={(e) => e.stopPropagation()}
+  style={{
+    position: "fixed",
+    top: statusMenuPosition.top,
+    left: statusMenuPosition.left,
+    width: statusMenuPosition.width,
+  }}
+  className="z-[100000] overflow-hidden rounded-2xl border border-[#1f2a32] bg-[#071214] p-2 shadow-[0_20px_60px_rgba(0,0,0,0.5)]"
+>
+        {STATUS_OPTIONS.map((status) => (
+          <button
+            key={status}
+            onClick={() => updateCompanyStatus(selectedCompany.id, status)}
+            className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-[15px] transition ${
+              selectedCompany.status === status
+                ? "bg-gradient-to-r from-blue-500 to-blue-600 text-white font-medium"
+                : "text-gray-300 hover:bg-[#0d1f26] hover:text-white"
+            }`}
+          >
+            {selectedCompany.status === status && (
+              <span className="text-white">✓</span>
+            )}
+            {status}
+          </button>
+        ))}
+      </div>
+    )}
+  </div>
+</div>
+
+    <div>
+      <h4 className="text-[15px] font-semibold text-gray-500">Statistics</h4>
+
+      <div className="mt-3 grid grid-cols-2 gap-4">
+        <div className="rounded-[24px] border border-gray-200 bg-[#f8fafc] p-4">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-gray-400">Total Calls</p>
+          <p className="mt-2 text-[34px] font-bold leading-none text-[#111827]">
+            {selectedCompanyActivity.filter((item) => item.type === "Call").length}
+          </p>
+        </div>
+
+        <div className="rounded-[24px] border border-gray-200 bg-[#f8fafc] p-4">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-gray-400">Total Emails</p>
+          <p className="mt-2 text-[34px] font-bold leading-none text-[#111827]">
+            {selectedCompanyActivity.filter((item) => item.type === "Email").length}
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <h4 className="text-[15px] font-semibold text-gray-500">Important Dates</h4>
+
+      <div className="mt-2 rounded-[18px] border border-gray-200 bg-[#f8fafc] px-3 py-2">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 text-[12px] text-[#111827] leading-4">
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-white text-gray-500 shadow-sm">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-3 w-3"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 6v6l4 2" />
+              </svg>
+            </span>
+            <span className="text-gray-500 shrink-0">Last contacted:</span>
+            <span className="font-medium min-w-0 truncate">
+              {formatDisplayDateTime(selectedCompany.lastContactedAt)}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 text-[12px] text-[#111827] leading-4">
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-white text-gray-500 shadow-sm">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-3 w-3"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path d="M12 5v14" />
+                <path d="M5 12h14" />
+              </svg>
+            </span>
+            <span className="text-gray-500 shrink-0">Created:</span>
+            <span className="font-medium min-w-0 truncate">
+              {formatDisplayDate(selectedCompany.createdAt)}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
+
+             {activeTab === "Notes" && (
+  <div className="mt-6 space-y-4">
+    {selectedCompanyNotes.length === 0 ? (
+      <div className="rounded-2xl border border-gray-200 bg-[#f8fafc] p-4 text-sm text-gray-500">
+        No notes yet.
+      </div>
+    ) : (
+      selectedCompanyNotes.map((note, index) => (
+        <div key={index} className="rounded-2xl border border-gray-200 bg-[#f8fafc] p-4">
+          <p className="text-sm font-semibold text-[#111827]">
+            {note.date} · {note.type}
+          </p>
+          <p className="mt-2 text-sm text-gray-600">{note.text}</p>
+        </div>
+      ))
+    )}
+
+    <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+      <p className="text-sm font-semibold text-[#111827]">Add Note</p>
       <textarea
         value={newCompanyNote}
         onChange={(e) => setNewCompanyNote(e.target.value)}
-        placeholder="Add a short dated company note..."
-        className="mt-3 min-h-[120px] w-full resize-none border-0 bg-transparent text-sm text-white outline-none placeholder:text-white/40"
+        placeholder="Add a short company note..."
+        className="mt-3 min-h-[120px] w-full resize-none rounded-2xl border border-gray-200 bg-[#f8fafc] px-4 py-4 text-sm text-[#111827] outline-none placeholder:text-gray-400"
       />
       <button
         onClick={saveCompanyNote}
-        className="mt-3 rounded-xl bg-gradient-to-r from-teal-400 to-blue-500 px-4 py-2 text-sm font-semibold text-white"
+        className="mt-3 rounded-xl border border-[#4ade80] bg-[#4ade80] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:opacity-90"
       >
         Save Note
       </button>
@@ -2144,47 +2912,39 @@ const width = 100 / overlapping.length;
   </div>
 )}
 
-              {activeTab === "Activity" && (
-  <div className="mt-8">
+             {activeTab === "Activity" && (
+  <div className="mt-6 space-y-4">
     {selectedCompanyActivity.length === 0 ? (
-      <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">
+      <div className="rounded-2xl border border-gray-200 bg-[#f8fafc] p-4 text-sm text-gray-500">
         No activity yet.
       </div>
     ) : (
-      <div className="space-y-3">
-        {selectedCompanyActivity.map((item, index) => {
-          const isCall = item.type === "Call";
+      selectedCompanyActivity.map((item, index) => (
+        <div
+          key={index}
+          className="rounded-2xl border border-gray-200 bg-[#f8fafc] p-4"
+        >
+          <div className="flex items-center gap-2 text-sm font-semibold text-[#111827]">
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-white text-[#2F80ED] shadow-sm">
+              <ActivityIcon type={item.type} />
+            </span>
+            <span>{item.date}</span>
+            <span className="text-gray-400">•</span>
+            <span>{item.time}</span>
+          </div>
 
-          return (
-            <div
-              key={`${item.type}-${item.date}-${item.time}-${index}`}
-              className="flex items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-4"
-            >
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-base">
-                {isCall ? "📞" : "✉️"}
-              </div>
-
-              <div>
-                <p className="text-sm font-semibold text-white">
-                  {isCall ? "Phone call" : "Email sent"} by {selectedCompany.rep || "Unknown rep"}
-                </p>
-                <p className="mt-1 text-sm text-white/70">
-                  {item.date} at {item.time}
-                </p>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+          <p className="mt-3 text-sm text-gray-600">{item.text}</p>
+        </div>
+      ))
     )}
   </div>
 )}
 
               {activeTab === "Documents" && (
-                <div className="mt-8 rounded-xl border border-white/10 bg-white/5 p-6 text-sm text-white/70">
-                  No documents uploaded yet.
-                </div>
-              )}
+  <div className="mt-6 rounded-2xl border border-gray-200 bg-[#f8fafc] p-4 text-sm text-gray-500">
+    No documents yet.
+  </div>
+)}
                  </div>
     </aside>
   </>
@@ -2270,6 +3030,20 @@ const width = 100 / overlapping.length;
       console.error("Error saving log:", error);
       return;
     }
+    await supabase
+  .from("companies")
+  .update({
+    last_contacted_at: new Date().toISOString(),
+  })
+  .eq("id", selectedCompany.id);
+
+setCompanyList((prev) =>
+  prev.map((company) =>
+    company.id === selectedCompany.id
+      ? { ...company, lastContactedAt: new Date().toISOString() }
+      : company
+  )
+);
 
     const { date, time } = formatActivityDateTime(data.created_at);
 
@@ -2287,6 +3061,21 @@ const width = 100 / overlapping.length;
         ...currentNotes,
       ],
     });
+
+    const lastContactedAt = new Date().toISOString();
+
+await supabase
+  .from("companies")
+  .update({ last_contacted_at: lastContactedAt })
+  .eq("id", mockActionCompany.id);
+
+setCompanyList((prev) =>
+  prev.map((company) =>
+    company.id === mockActionCompany.id
+      ? { ...company, lastContactedAt }
+      : company
+  )
+);
 
     setLogSuccessMessage(
       activityType === "Call" ? "📞 Call logged" : "✉️ Email logged"
@@ -2343,9 +3132,9 @@ const width = 100 / overlapping.length;
 
       <div className="mt-8 grid grid-cols-1 gap-5 md:grid-cols-2">
         <div>
-          <label className="mb-2 block text-sm font-medium text-gray-700">
-            Company Name *
-          </label>
+          <label className="text-sm font-semibold text-gray-700">
+  Company Name <span className="text-red-500">*</span>
+</label>
           <input
             value={editedCompany.company}
             onChange={(e) =>
@@ -2414,7 +3203,7 @@ const width = 100 / overlapping.length;
             }
             className="w-full rounded-2xl border border-gray-300 bg-white px-4 py-3 text-gray-900 outline-none focus:border-blue-500"
           >
-            {REP_OPTIONS.map((rep) => (
+            {repOptions.map((rep) => (
               <option key={rep} value={rep}>
                 {rep}
               </option>
@@ -2515,106 +3304,7 @@ const width = 100 / overlapping.length;
     </div>
   </div>
 )}
-{addModalOpen && (
-  <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 px-4">
-    <div className="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl">
-      <div className="flex items-center justify-between">
-        <h3 className="text-2xl font-semibold">Add Company</h3>
-        <button
-          onClick={() => setAddModalOpen(false)}
-          className="rounded-xl px-3 py-2 text-sm text-gray-500 hover:bg-gray-100"
-        >
-          ✕
-        </button>
-      </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-2">
-        <input
-          type="text"
-          placeholder="Company Name"
-          value={newCompany.company}
-          onChange={(e) => setNewCompany({ ...newCompany, company: e.target.value })}
-          className="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
-        />
-
-        <input
-          type="text"
-          placeholder="Contact Name"
-          value={newCompany.contact}
-          onChange={(e) => setNewCompany({ ...newCompany, contact: e.target.value })}
-          className="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
-        />
-
-        <input
-          type="email"
-          placeholder="Email"
-          value={newCompany.email}
-          onChange={(e) => setNewCompany({ ...newCompany, email: e.target.value })}
-          className="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
-        />
-
-        <input
-          type="text"
-          placeholder="Phone"
-          value={newCompany.phone}
-          onChange={(e) => setNewCompany({ ...newCompany, phone: e.target.value })}
-          className="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
-        />
-
-        <input
-          type="text"
-          placeholder="Website"
-          value={newCompany.website}
-          onChange={(e) => setNewCompany({ ...newCompany, website: e.target.value })}
-          className="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
-        />
-
-        <select
-          value={newCompany.status}
-          onChange={(e) => setNewCompany({ ...newCompany, status: e.target.value })}
-          className="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
-        >
-          <option>WIP</option>
-          <option>Company call done</option>
-          <option>YES</option>
-          <option>None</option>
-        </select>
-
-        <input
-          type="text"
-          placeholder="Address"
-          value={newCompany.address}
-          onChange={(e) => setNewCompany({ ...newCompany, address: e.target.value })}
-          className="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none md:col-span-2"
-        />
-
-        <textarea
-          placeholder="Latest Note"
-          value={newCompany.latestNote}
-          onChange={(e) => setNewCompany({ ...newCompany, latestNote: e.target.value })}
-          className="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none md:col-span-2"
-          rows={4}
-        />
-      </div>
-
-      <div className="mt-6 flex justify-end gap-3">
-        <button
-          onClick={() => setAddModalOpen(false)}
-          className="rounded-2xl border border-gray-300 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
-        >
-          Cancel
-        </button>
-
-        <button
-          onClick={saveNewCompany}
-          className="rounded-2xl bg-gradient-to-r from-teal-400 to-blue-500 px-4 py-3 text-sm font-medium text-white hover:opacity-90"
-        >
-          Save Company
-        </button>
-      </div>
-    </div>
-  </div>
-   )}
 {addModalOpen && (
   <div
     className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 px-4"
@@ -2634,25 +3324,45 @@ const width = 100 / overlapping.length;
         </button>
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-2">
-        <input
-          type="text"
-          placeholder="Company Name"
-          value={newCompany.company}
-          onChange={(e) => setNewCompany({ ...newCompany, company: e.target.value })}
-          className="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
-        />
+      <div className="mt-6 grid items-start gap-4 md:grid-cols-2">
+        <div className="min-h-[92px]">
+  <div className="relative">
+    <span className="absolute left-2 top-1/2 z-10 -translate-y-1/2 text-red-500">
+      *
+    </span>
+
+    <input
+      type="text"
+      placeholder="Company Name"
+      value={newCompany.company}
+      onChange={(e) => {
+        setNewCompany({ ...newCompany, company: e.target.value });
+        setCompanyNameError("");
+      }}
+      className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none placeholder:text-gray-500 ${
+        companyNameError ? "border-red-400" : "border-gray-300"
+      }`}
+    />
+  </div>
+
+  {companyNameError && (
+    <p className="mt-1 text-sm font-medium text-red-500">
+      {companyNameError}
+    </p>
+  )}
+</div>
         <select
   value={newCompany.rep}
   onChange={(e) => setNewCompany({ ...newCompany, rep: e.target.value })}
   className="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
 >
-  <option>William</option>
-  <option>Evan</option>
-  <option>Dalin</option>
-  <option>Yana</option>
-  <option>Jon</option>
-  <option>Prince</option>
+  <option value="">SALES REP</option>
+
+{repOptions.map((rep) => (
+  <option key={rep} value={rep}>
+    {rep}
+  </option>
+))}
 </select>
 <select
   value={newCompany.show}
@@ -2666,10 +3376,13 @@ const width = 100 / overlapping.length;
   }}
   className="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
 >
-  <option>MedTrade</option>
-  <option>Expo West</option>
-  <option>ASD</option>
-  <option value="__ADD_NEW__">ADD NEW</option>
+  <option value="">TRADESHOW</option>
+  {availableTradeShows.map((show) => (
+  <option key={show} value={show}>
+    {show}
+  </option>
+))}
+<option value="__ADD_NEW__">ADD NEW</option>
 </select>
 {editedCompany.show === "__ADD_NEW__" && (
   <input
@@ -2759,7 +3472,7 @@ const width = 100 / overlapping.length;
 
         <button
           onClick={saveNewCompany}
-          className="rounded-2xl bg-gradient-to-r from-teal-400 to-blue-500 px-4 py-3 text-sm font-medium text-white hover:opacity-90"
+          className="rounded-2xl border border-[#4ade80] bg-[#4ade80] px-4 py-3 text-sm font-medium text-white transition hover:opacity-90"
         >
           Save Company
         </button>
@@ -2881,7 +3594,7 @@ const width = 100 / overlapping.length;
 
           <button
             onClick={saveEditedEvent}
-            className="rounded-2xl bg-gradient-to-r from-teal-400 to-blue-500 px-4 py-3 text-sm font-medium text-white hover:opacity-90"
+            className="rounded-2xl border border-[#4ade80] bg-[#4ade80] px-4 py-3 text-sm font-medium text-white transition hover:opacity-90"
           >
             {editingEventId ? "Save Changes" : "Create Event"}
           </button>
@@ -2963,7 +3676,7 @@ const width = 100 / overlapping.length;
 
         <button
           onClick={handleImportSheet}
-          className="rounded-2xl bg-gradient-to-r from-teal-400 to-blue-500 px-4 py-3 text-sm font-medium text-white hover:opacity-90"
+          className="rounded-2xl border border-[#4ade80] bg-[#4ade80] px-4 py-3 text-sm font-medium text-white transition hover:opacity-90"
         >
           Verify Import
         </button>

@@ -187,7 +187,7 @@ export default function WorkingFbaShipmentsPage() {
             <div className="border-t border-gray-200 px-6 py-3 lg:px-8">
               <div className="flex flex-wrap items-center gap-3">
                 <a
-                  href="/dashboard/shipments"
+                  href="/dashboard/shipment"
                   className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
                 >
                   <HomeIcon />
@@ -203,7 +203,7 @@ export default function WorkingFbaShipmentsPage() {
                 </a>
 
                 <a
-                  href="/dashboard/shipments/drafts"
+                  href="/dashboard/drafts"
                   className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
                 >
                   <DraftIcon />
@@ -211,7 +211,7 @@ export default function WorkingFbaShipmentsPage() {
                 </a>
 
                 <a
-                  href="/dashboard/shipments/fba"
+                  href="/dashboard/fba"
                   className="flex items-center gap-2 rounded-xl bg-[#eef6ff] px-4 py-3 text-sm font-semibold text-[#111827]"
                 >
                   <FbaIcon />
@@ -219,7 +219,7 @@ export default function WorkingFbaShipmentsPage() {
                 </a>
 
                 <a
-                  href="/dashboard/shipments/shipped"
+                  href="/dashboard/shipped"
                   className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
                 >
                   <TruckIcon />

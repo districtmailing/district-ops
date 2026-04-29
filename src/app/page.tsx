@@ -1,6 +1,31 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 
 export default function Home() {
+  const router = useRouter();
+const [email, setEmail] = useState("");
+const [password, setPassword] = useState("");
+
+const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
+  e.preventDefault();
+
+  const { error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
+
+  if (error) {
+    alert(error.message);
+    return;
+  }
+
+  router.push("/dashboard");
+};
+
   return (
     <main className="min-h-screen">
       <div className="grid min-h-screen md:grid-cols-2">
@@ -23,7 +48,7 @@ export default function Home() {
               Access your sales, operations, and internal systems
             </p>
 
-            <form className="mt-10 space-y-5">
+            <form onSubmit={handleLogin} className="mt-10 space-y-5">
 
               <div>
                 <label className="mb-2 block text-sm text-gray-600">Email</label>
@@ -31,6 +56,8 @@ export default function Home() {
                   type="email"
                   placeholder="Enter Email"
                   className="w-full rounded-xl border border-gray-300 bg-white px-4 py-4 text-black placeholder:text-gray-400 outline-none focus:border-teal-400"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                 />
               </div>
 
@@ -40,15 +67,17 @@ export default function Home() {
                   type="password"
                   placeholder="Enter Password"
                   className="w-full rounded-xl border border-gray-300 bg-white px-4 py-4 text-black placeholder:text-gray-400 outline-none focus:border-teal-400"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                 />
               </div>
 
-              <Link
-                href="/dashboard"
-                className="block w-full rounded-xl bg-gradient-to-r from-teal-400 to-blue-500 px-4 py-4 text-center text-base font-bold text-white shadow-[0_0_20px_rgba(45,212,191,0.4)] transition hover:opacity-90"
-              >
-                LOGIN
-              </Link>
+              <button
+  type="submit"
+  className="w-full cursor-pointer rounded-xl bg-gradient-to-r from-teal-400 to-blue-500 px-4 py-4 text-base font-bold text-white shadow-[0_0_20px_rgba(45,212,191,0.4)] transition hover:opacity-90"
+>
+  LOGIN
+</button>
 
             </form>
 
@@ -60,9 +89,9 @@ export default function Home() {
               </p>
               <p className="text-sm text-gray-500">
                 Don't have an account?{" "}
-                <span className="text-teal-500 font-semibold cursor-pointer">
-                  Sign Up
-                </span>
+                <Link href="/signup" className="text-teal-500 font-semibold">
+  Sign Up
+</Link>
               </p>
             </div>
 

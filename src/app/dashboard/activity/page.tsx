@@ -77,12 +77,19 @@ function mapCompanyRow(row: any): Company {
 
 const TRADE_SHOW_OPTIONS = ["MedTrade", "Expo West", "ASD"];
 const REP_OPTIONS = ["William", "Evan", "Dalin", "Yana", "Jon", "Prince"];
-type RangeFilter = "daily" | "weekly" | "monthly" | "quarterly";
+type RangeFilter = "daily" | "weekly" | "monthly" | "quarterly" | "custom";
 
 export default function ActivityPage() {
   const [selectedRep, setSelectedRep] = useState("All Reps");
   const [selectedShow, setSelectedShow] = useState("All Shows");
   const [rangeFilter, setRangeFilter] = useState<RangeFilter>("daily");
+  const [customStartDate, setCustomStartDate] = useState(() => {
+  return new Date().toISOString().split("T")[0];
+});
+const [customEndDate, setCustomEndDate] = useState(() => {
+  return new Date().toISOString().split("T")[0];
+});
+const [rangeAnchorDate, setRangeAnchorDate] = useState(() => new Date());
 
   const [companyList, setCompanyList] = useState<Company[]>([]);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
@@ -93,35 +100,57 @@ export default function ActivityPage() {
     return Array.from(new Set([...TRADE_SHOW_OPTIONS, ...showsFromCompanies]));
   }, [companyList]);
 
-  const periodStart = useMemo(() => {
-    const now = new Date();
-    const start = new Date(now);
+  const periodRange = useMemo(() => {
+  const start = new Date(rangeAnchorDate);
+  const end = new Date(rangeAnchorDate);
 
-    if (rangeFilter === "daily") {
-      start.setHours(0, 0, 0, 0);
-      return start;
-    }
+  if (rangeFilter === "daily") {
+    start.setHours(0, 0, 0, 0);
+    end.setHours(23, 59, 59, 999);
+    return { start, end };
+  }
 
-    if (rangeFilter === "weekly") {
-      const day = start.getDay();
-      const diff = day === 0 ? 6 : day - 1;
-      start.setDate(start.getDate() - diff);
-      start.setHours(0, 0, 0, 0);
-      return start;
-    }
+  if (rangeFilter === "weekly") {
+    const day = start.getDay();
+    const diff = day === 0 ? 6 : day - 1;
+    start.setDate(start.getDate() - diff);
+    start.setHours(0, 0, 0, 0);
 
-    if (rangeFilter === "monthly") {
-      start.setDate(1);
-      start.setHours(0, 0, 0, 0);
-      return start;
-    }
+    end.setTime(start.getTime());
+    end.setDate(start.getDate() + 6);
+    end.setHours(23, 59, 59, 999);
 
+    return { start, end };
+  }
+
+  if (rangeFilter === "monthly") {
+    start.setDate(1);
+    start.setHours(0, 0, 0, 0);
+
+    end.setMonth(start.getMonth() + 1, 0);
+    end.setHours(23, 59, 59, 999);
+
+    return { start, end };
+  }
+
+  if (rangeFilter === "quarterly") {
     const month = start.getMonth();
     const quarterStartMonth = Math.floor(month / 3) * 3;
+
     start.setMonth(quarterStartMonth, 1);
     start.setHours(0, 0, 0, 0);
-    return start;
-  }, [rangeFilter]);
+
+    end.setFullYear(start.getFullYear(), quarterStartMonth + 3, 0);
+    end.setHours(23, 59, 59, 999);
+
+    return { start, end };
+  }
+
+  const customStart = new Date(`${customStartDate}T00:00:00`);
+  const customEnd = new Date(`${customEndDate}T23:59:59`);
+
+  return { start: customStart, end: customEnd };
+}, [rangeFilter, customStartDate, customEndDate, rangeAnchorDate]);
 
   const filteredCompanies = useMemo(() => {
     return companyList.filter((company) => {
@@ -139,11 +168,11 @@ export default function ActivityPage() {
     return activities
       .filter((item) => filteredCompanyIds.has(item.companyId))
       .filter((item) => {
-        const created = new Date(item.createdAt);
-        return created >= periodStart;
-      })
+  const created = new Date(item.createdAt);
+  return created >= periodRange.start && created <= periodRange.end;
+})
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [activities, filteredCompanyIds, periodStart]);
+  }, [activities, filteredCompanyIds, periodRange]);
 
   const touchedCompanyIds = useMemo(() => {
     return new Set(filteredActivities.map((item) => item.companyId));
@@ -183,7 +212,49 @@ const pipelineStatusMax = Math.max(
   1,
   ...pipelineStatusData.map((item) => item.value)
 );
+const visibleRangeLabel = useMemo(() => {
+  const formatDate = (date: Date) =>
+    date.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
 
+  if (rangeFilter === "daily") {
+    return formatDate(periodRange.start);
+  }
+
+  return `${formatDate(periodRange.start)} – ${formatDate(periodRange.end)}`;
+}, [rangeFilter, periodRange]);
+const shiftRange = (direction: -1 | 1) => {
+  if (rangeFilter === "custom") return;
+
+  setRangeAnchorDate((prev) => {
+    const next = new Date(prev);
+
+    if (rangeFilter === "daily") {
+      next.setDate(next.getDate() + direction);
+      return next;
+    }
+
+    if (rangeFilter === "weekly") {
+      next.setDate(next.getDate() + direction * 7);
+      return next;
+    }
+
+    if (rangeFilter === "monthly") {
+      next.setMonth(next.getMonth() + direction);
+      return next;
+    }
+
+    if (rangeFilter === "quarterly") {
+      next.setMonth(next.getMonth() + direction * 3);
+      return next;
+    }
+
+    return next;
+  });
+};
   useEffect(() => {
     const loadPageData = async () => {
       setLoading(true);
@@ -306,22 +377,72 @@ const pipelineStatusMax = Math.max(
           </div>
 
           <div className="px-6 py-6 lg:px-8">
-            <div className="mb-6">
-  <div className="inline-flex rounded-[24px] border border-gray-200 bg-[#f8f8f8] p-1 shadow-sm">
-    {(["daily", "weekly", "monthly", "quarterly"] as RangeFilter[]).map((range) => (
-      <button
-        key={range}
-        onClick={() => setRangeFilter(range)}
-        className={`rounded-[18px] px-6 py-3 text-base font-medium capitalize transition ${
-          rangeFilter === range
-            ? "bg-white text-[#111827] shadow-sm"
-            : "text-gray-500 hover:text-[#111827]"
-        }`}
-      >
-        {range}
-      </button>
-    ))}
+           <div className="mb-6 flex flex-col gap-4">
+  <div className="flex flex-wrap items-center justify-between gap-3">
+    {rangeFilter !== "custom" && (
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          onClick={() => shiftRange(-1)}
+          className="rounded-[18px] border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+        >
+          ← Prev
+        </button>
+
+        <div className="rounded-[18px] border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-700 shadow-sm">
+          {visibleRangeLabel}
+        </div>
+
+        <button
+          onClick={() => shiftRange(1)}
+          className="rounded-[18px] border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+        >
+          Next →
+        </button>
+      </div>
+    )}
+
+    {rangeFilter === "custom" && (
+      <div className="rounded-[18px] border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-700 shadow-sm">
+        {visibleRangeLabel}
+      </div>
+    )}
+
+    <div className="inline-flex rounded-[24px] border border-gray-200 bg-[#f8f8f8] p-1 shadow-sm">
+      {(["daily", "weekly", "monthly", "quarterly", "custom"] as RangeFilter[]).map((range) => (
+        <button
+          key={range}
+          onClick={() => setRangeFilter(range)}
+          className={`rounded-[18px] px-6 py-3 text-base font-medium capitalize transition ${
+            rangeFilter === range
+              ? "bg-white text-[#111827] shadow-sm"
+              : "text-gray-500 hover:text-[#111827]"
+          }`}
+        >
+          {range}
+        </button>
+      ))}
+    </div>
   </div>
+
+  {rangeFilter === "custom" && (
+    <div className="flex flex-wrap items-center gap-3">
+      <input
+        type="date"
+        value={customStartDate}
+        onChange={(e) => setCustomStartDate(e.target.value)}
+        className="h-12 rounded-2xl border border-gray-300 bg-white px-4 text-sm text-gray-700 outline-none"
+      />
+
+      <span className="text-sm text-gray-500">to</span>
+
+      <input
+        type="date"
+        value={customEndDate}
+        onChange={(e) => setCustomEndDate(e.target.value)}
+        className="h-12 rounded-2xl border border-gray-300 bg-white px-4 text-sm text-gray-700 outline-none"
+      />
+    </div>
+  )}
 </div>
 
 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -367,7 +488,7 @@ const pipelineStatusMax = Math.max(
                     </div>
                   ) : filteredActivities.length === 0 ? (
                     <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
-                      No calls or emails logged for this filter yet.
+                      No calls or emails logged for this date yet.
                     </div>
                   ) : (
                     <div className="space-y-4">

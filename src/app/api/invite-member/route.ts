@@ -16,9 +16,13 @@ export async function POST(req: Request) {
 
     const { error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email);
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
+   if (error) {
+  console.error("Supabase invite error:", error);
+  return NextResponse.json(
+    { error: error.message },
+    { status: 400 }
+  );
+}
 
     return NextResponse.json({ success: true });
   } catch (error) {

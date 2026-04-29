@@ -98,7 +98,7 @@ const handleInvite = async () => {
 
   if (!res.ok) {
     console.error("Email error:", result);
-    alert("Invite saved but email failed.");
+    alert(result.error || "Invite saved but email failed.");
     return;
   }
 

@@ -45,29 +45,39 @@ const [confirmPassword, setConfirmPassword] = useState("");
   const handleSignup = async (e: React.FormEvent<HTMLFormElement>) => {
   e.preventDefault();
 
-  // ✅ check passwords match
   if (password !== confirmPassword) {
     alert("Passwords do not match.");
     return;
   }
 
-  const { error } = await supabase.auth.signUp({
-    email,
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanFirstName = firstName.trim();
+  const cleanLastName = lastName.trim();
+  const fullName = `${cleanFirstName} ${cleanLastName}`.trim();
+
+  const { data, error } = await supabase.auth.signUp({
+    email: cleanEmail,
     password,
     options: {
+      emailRedirectTo: `${window.location.origin}/dashboard`,
       data: {
-        first_name: firstName,
-        last_name: lastName,
+        first_name: cleanFirstName,
+        last_name: cleanLastName,
+        full_name: fullName,
+        name: fullName,
       },
     },
   });
+
+  console.log("SIGNUP DATA:", data);
+  console.log("SIGNUP ERROR:", error);
 
   if (error) {
     alert(error.message);
     return;
   }
 
-  alert("Check your email to confirm your account.");
+  alert("Account created. Check your email to confirm your account.");
   router.push("/");
 };
 

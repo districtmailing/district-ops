@@ -13,10 +13,12 @@ const [password, setPassword] = useState("");
 const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
   e.preventDefault();
 
-  const { error } = await supabase.auth.signInWithPassword({
-    email,
-    password,
-  });
+  const cleanEmail = email.trim().toLowerCase();
+
+const { error } = await supabase.auth.signInWithPassword({
+  email: cleanEmail,
+  password,
+});
 
   if (error) {
     alert(error.message);

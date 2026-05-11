@@ -274,6 +274,7 @@ const [pendingImportRows, setPendingImportRows] = useState<
 >([]);
 const [pendingImportFileName, setPendingImportFileName] = useState("");
 const [customTradeShow, setCustomTradeShow] = useState("");
+const [customSalesRep, setCustomSalesRep] = useState("");
 const [companyList, setCompanyList] = useState<Company[]>([]);
 const [companyNotes, setCompanyNotes] = useState<
   Record<string, { date: string; time: string; type: string; text: string }[]>
@@ -901,11 +902,47 @@ setCompanyNameError("");
 const showName = newCompany.show.trim();
 const statusName = newCompany.status.trim();
 
-const { data: repData } = await supabase
-  .from("sales_reps")
-  .select("id, name")
-  .eq("name", repName)
-  .maybeSingle();
+let repData: { id: string; name: string } | null = null;
+
+if (newCompany.rep === "__ADD_NEW__") {
+  const trimmedCustomRep = customSalesRep.trim();
+
+  if (!trimmedCustomRep) {
+    alert("Please enter a sales rep name.");
+    return;
+  }
+
+  const { data: existingRep } = await supabase
+    .from("sales_reps")
+    .select("id, name")
+    .eq("name", trimmedCustomRep)
+    .maybeSingle();
+
+  if (existingRep) {
+    repData = existingRep;
+  } else {
+    const { data: insertedRep, error: insertRepError } = await supabase
+      .from("sales_reps")
+      .insert([{ name: trimmedCustomRep, team_id: currentTeamId }])
+      .select("id, name")
+      .single();
+
+    if (insertRepError) {
+      console.error("Error creating sales rep:", insertRepError);
+      return;
+    }
+
+    repData = insertedRep;
+  }
+} else {
+  const { data: existingRep } = await supabase
+    .from("sales_reps")
+    .select("id, name")
+    .eq("name", repName)
+    .maybeSingle();
+
+  repData = existingRep;
+}
 
   let resolvedShowName = newCompany.show;
 let showData: { id: string; name: string } | null = null;
@@ -1032,6 +1069,7 @@ setActiveTab("Overview");
   status: "None",
 });
 setCustomTradeShow("");
+setCustomSalesRep("");
 
     setAddModalOpen(false);
     return;
@@ -1103,6 +1141,7 @@ setActiveTab("Overview");
   status: "None",
 });
 setCustomTradeShow("");
+setCustomSalesRep("");
 
   setAddModalOpen(false);
 };
@@ -3027,7 +3066,7 @@ const width = 100 / overlapping.length;
       .single();
 
     if (error) {
-      console.error("Error saving log:", error);
+      console.error("Error saving log:", JSON.stringify(error, null, 2));
       return;
     }
     await supabase
@@ -3035,7 +3074,7 @@ const width = 100 / overlapping.length;
   .update({
     last_contacted_at: new Date().toISOString(),
   })
-  .eq("id", selectedCompany.id);
+  .eq("id", mockActionCompany.id);
 
 setCompanyList((prev) =>
   prev.map((company) =>
@@ -3169,6 +3208,7 @@ setCompanyList((prev) =>
 
     if (value !== "__ADD_NEW__") {
       setCustomTradeShow("");
+      setCustomSalesRep("");
     }
   }}
   className="w-full rounded-2xl border border-gray-300 bg-white px-4 py-3 text-gray-900 outline-none focus:border-blue-500"
@@ -3351,19 +3391,40 @@ setCompanyList((prev) =>
     </p>
   )}
 </div>
-        <select
-  value={newCompany.rep}
-  onChange={(e) => setNewCompany({ ...newCompany, rep: e.target.value })}
-  className="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
->
-  <option value="">SALES REP</option>
+        <div>
+  <select
+    value={newCompany.rep}
+    onChange={(e) => {
+      const value = e.target.value;
+      setNewCompany({ ...newCompany, rep: value });
 
-{repOptions.map((rep) => (
-  <option key={rep} value={rep}>
-    {rep}
-  </option>
-))}
-</select>
+      if (value !== "__ADD_NEW__") {
+        setCustomSalesRep("");
+      }
+    }}
+    className="w-full rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
+  >
+    <option value="">SALES REP</option>
+
+    {repOptions.map((rep) => (
+      <option key={rep} value={rep}>
+        {rep}
+      </option>
+    ))}
+
+    <option value="__ADD_NEW__">ADD NEW</option>
+  </select>
+
+  {newCompany.rep === "__ADD_NEW__" && (
+    <input
+      type="text"
+      placeholder="Enter new sales rep name"
+      value={customSalesRep}
+      onChange={(e) => setCustomSalesRep(e.target.value)}
+      className="mt-2 w-full rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
+    />
+  )}
+</div>
 <select
   value={newCompany.show}
   onChange={(e) => {
@@ -3372,6 +3433,7 @@ setCompanyList((prev) =>
 
     if (value !== "__ADD_NEW__") {
       setCustomTradeShow("");
+      setCustomSalesRep("");
     }
   }}
   className="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"

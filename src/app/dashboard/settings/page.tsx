@@ -65,48 +65,61 @@ const handleInvite = async () => {
   const cleanEmail = inviteEmail.trim().toLowerCase();
   const { data: userData } = await supabase.auth.getUser();
 
-  const { error } = await supabase.from("team_invites").upsert(
-    {
-      team_id: currentTeamId,
-      email: cleanEmail,
-      role: inviteRole,
-      status: "pending",
-      invited_by: userData.user?.id,
-    },
-    {
-      onConflict: "team_id,email",
-    }
-  );
+  const { data: savedInvite, error } = await supabase
+    .from("team_invites")
+    .upsert(
+      {
+        team_id: currentTeamId,
+        email: cleanEmail,
+        role: inviteRole,
+        status: "pending",
+        invited_by: userData.user?.id,
+      },
+      {
+        onConflict: "team_id,email",
+      }
+    )
+    .select()
+    .single();
 
   if (error) {
     console.error("Invite DB error:", error);
     alert("Error saving invite");
     return;
   }
-
+alert("LIVE TEST: calling /api/invite-member Resend route");
   const res = await fetch("/api/invite-member", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      email: cleanEmail,
-    }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: cleanEmail }),
   });
 
   const result = await res.json();
 
   if (!res.ok) {
-    console.error("Email error:", result);
-    alert(result.error || "Invite saved but email failed.");
+    console.error("Invite email error:", result);
+    alert("Invite saved, but email failed.");
     return;
   }
 
   setInviteOpen(false);
   setInviteEmail("");
   setInviteRole("viewer");
+  setActiveTab("team");
 
-  window.location.reload();
+  setTeamMembers((prev) => [
+    ...prev.filter((member) => member.email.toLowerCase() !== cleanEmail),
+    {
+      id: savedInvite.id,
+      name: "Pending Member",
+      email: cleanEmail,
+      role: inviteRole,
+      joined: "Pending",
+      status: "Pending" as const,
+    },
+  ]);
+
+  alert("Invite sent successfully.");
 };
 
 const openManageMember = (member: TeamMember) => {
@@ -172,6 +185,49 @@ const handleRemoveMember = async () => {
 
     if (!user) return;
 
+   const userEmail = user.email?.toLowerCase();
+
+if (userEmail) {
+  const { data: pendingInvite, error: inviteLookupError } = await supabase
+    .from("team_invites")
+    .select("*")
+    .eq("email", userEmail)
+    .in("status", ["pending", "accepted"])
+    .limit(1)
+    .maybeSingle();
+
+  if (inviteLookupError) {
+    console.error("Error finding pending invite:", inviteLookupError);
+  }
+
+  if (pendingInvite) {
+    const { error: joinError } = await supabase.from("team_members").upsert(
+      {
+        team_id: pendingInvite.team_id,
+        user_id: user.id,
+        role: pendingInvite.role || "viewer",
+      },
+      {
+        onConflict: "team_id,user_id",
+      }
+    );
+
+    if (joinError) {
+      console.error("Error joining invited team:", joinError);
+      return;
+    }
+
+    const { error: acceptError } = await supabase
+      .from("team_invites")
+      .update({ status: "accepted" })
+      .eq("id", pendingInvite.id);
+
+    if (acceptError) {
+      console.error("Error accepting invite:", acceptError);
+    }
+  }
+}
+
     const firstName = user.user_metadata?.first_name || "";
 const lastName = user.user_metadata?.last_name || "";
 
@@ -213,7 +269,7 @@ setCurrentTeamId(teamMemberData?.team_id || null);
     .single();
 
   if (teamError) {
-    console.error("Error creating team:", teamError);
+    console.error("Error creating team:", JSON.stringify(teamError, null, 2));
     return;
   }
 
@@ -321,7 +377,7 @@ setCurrentTeamId(teamMemberData?.team_id || null);
   .from("team_invites")
   .select("*")
   .eq("team_id", teamMemberData.team_id)
-  .eq("status", "pending");
+  .in("status", ["pending", "accepted"]);
 
 const pendingMembers: TeamMember[] =
   invites?.map((inv: any) => ({

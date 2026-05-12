@@ -36,17 +36,46 @@ const { error } = await supabase.auth.signInWithPassword({
         <section className="flex items-center justify-center bg-white px-8 py-12 text-black">
           <div className="w-full max-w-md">
 
-            {/* LOGO */}
-            <div className="mb-10 flex items-center gap-4">
-              <div className="h-12 w-12 rounded-full bg-gradient-to-r from-teal-400 to-blue-500 shadow-[0_0_20px_rgba(45,212,191,0.4)]" />
-              <div>
-                <p className="text-3xl font-bold tracking-tight">District</p>
-                <p className="text-sm text-gray-500">Internal Hub</p>
-              </div>
-            </div>
+            {/* SELLERCOMP LOGO */}
+<div className="mb-10 flex justify-center">
+  <div className="flex items-center gap-3">
+    <svg
+      viewBox="0 0 64 64"
+      className="h-16 w-16"
+      fill="none"
+    >
+      <path
+        d="M12 18H20L24 38C24.6 40.6 26.9 42.5 29.6 42.5H45.5C48 42.5 50.2 40.8 50.8 38.4L55 22H23.5"
+        stroke="#67C23A"
+        strokeWidth="4.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="31" cy="50" r="3.8" fill="#67C23A" />
+      <circle cx="46" cy="50" r="3.8" fill="#67C23A" />
+      <rect x="30" y="29" width="5" height="9" rx="1" fill="#F4C430" />
+      <rect x="38" y="25" width="5" height="13" rx="1" fill="#41C7D9" />
+      <rect x="46" y="21" width="5" height="17" rx="1" fill="#2F80ED" />
+      <path
+        d="M26 35L38 23L43 28L56 15"
+        stroke="#F59E0B"
+        strokeWidth="4.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
 
-            <h1 className="text-5xl font-bold tracking-tight">Welcome Back</h1>
-            <p className="mt-4 text-lg text-gray-600">
+    <div className="text-[34px] font-extrabold leading-none">
+      <span style={{ color: "#2F80ED" }}>Seller</span>
+      <span style={{ color: "#67C23A" }}>Comp</span>
+    </div>
+  </div>
+</div>
+
+            <h1 className="text-center text-5xl font-bold tracking-tight">
+  Welcome Back
+</h1>
+            <p className="text-center mt-4 text-lg text-gray-600">
               Access your sales, operations, and internal systems
             </p>
 

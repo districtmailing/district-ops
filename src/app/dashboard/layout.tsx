@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { acceptPendingTeamInviteForUser } from "@/lib/acceptTeamInvite";
 import { supabase } from "@/lib/supabase";
 
 const activeTabStyle =
@@ -222,6 +223,9 @@ useEffect(() => {
   const getUser = async () => {
     const { data } = await supabase.auth.getUser();
     setUser(data.user);
+    if (data.user) {
+      await acceptPendingTeamInviteForUser(data.user);
+    }
   };
 
   getUser();

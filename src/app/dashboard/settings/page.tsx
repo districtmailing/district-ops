@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { acceptPendingTeamInviteForUser } from "@/lib/acceptTeamInvite";
 import { supabase } from "@/lib/supabase";
 
 type SettingsTab =
@@ -185,48 +186,7 @@ const handleRemoveMember = async () => {
 
     if (!user) return;
 
-   const userEmail = user.email?.toLowerCase();
-
-if (userEmail) {
-  const { data: pendingInvite, error: inviteLookupError } = await supabase
-    .from("team_invites")
-    .select("*")
-    .eq("email", userEmail)
-    .in("status", ["pending", "accepted"])
-    .limit(1)
-    .maybeSingle();
-
-  if (inviteLookupError) {
-    console.error("Error finding pending invite:", inviteLookupError);
-  }
-
-  if (pendingInvite) {
-    const { error: joinError } = await supabase.from("team_members").upsert(
-      {
-        team_id: pendingInvite.team_id,
-        user_id: user.id,
-        role: pendingInvite.role || "viewer",
-      },
-      {
-        onConflict: "team_id,user_id",
-      }
-    );
-
-    if (joinError) {
-      console.error("Error joining invited team:", joinError);
-      return;
-    }
-
-    const { error: acceptError } = await supabase
-      .from("team_invites")
-      .update({ status: "accepted" })
-      .eq("id", pendingInvite.id);
-
-    if (acceptError) {
-      console.error("Error accepting invite:", acceptError);
-    }
-  }
-}
+    await acceptPendingTeamInviteForUser(user);
 
     const firstName = user.user_metadata?.first_name || "";
 const lastName = user.user_metadata?.last_name || "";
@@ -377,7 +337,7 @@ setCurrentTeamId(teamMemberData?.team_id || null);
   .from("team_invites")
   .select("*")
   .eq("team_id", teamMemberData.team_id)
-  .in("status", ["pending", "accepted"]);
+  .eq("status", "pending");
 
 const pendingMembers: TeamMember[] =
   invites?.map((inv: any) => ({

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 
 type ShippedShipment = {
@@ -235,45 +236,45 @@ export default function ShippedToAmazonPage() {
 
             <div className="border-t border-gray-200 px-6 py-3 lg:px-8">
               <div className="flex flex-wrap items-center gap-3">
-                <a
+                <Link
                   href="/dashboard/shipment"
                   className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
                 >
                   <HomeIcon />
                   Shipments
-                </a>
+                </Link>
 
-                <a
+                <Link
                   href="/dashboard/inventory"
                   className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
                 >
                   <InventoryIcon />
                   FBA Inventory
-                </a>
+                </Link>
 
-                <a
+                <Link
                   href="/dashboard/drafts"
                   className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
                 >
                   <DraftIcon />
                   Draft Shipments
-                </a>
+                </Link>
 
-                <a
+                <Link
                   href="/dashboard/fba"
                   className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
                 >
                   <FbaIcon />
                   FBA Shipments
-                </a>
+                </Link>
 
-                <a
+                <Link
                   href="/dashboard/shipped"
                   className="flex items-center gap-2 rounded-xl bg-[#eef6ff] px-4 py-3 text-sm font-semibold text-[#111827]"
                 >
                   <TruckIcon />
                   Shipped to Amazon
-                </a>
+                </Link>
               </div>
             </div>
           </div>

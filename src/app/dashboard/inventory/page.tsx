@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 
 type InventoryItem = {
@@ -317,7 +318,7 @@ const RowPrintIcon = () => (
 
     <div className="border-t border-gray-200 px-6 py-3 lg:px-8">
   <div className="flex flex-wrap items-center gap-3">
-    <a
+    <Link
       href="/dashboard/shipment"
       className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
     >
@@ -335,9 +336,9 @@ const RowPrintIcon = () => (
         <path d="M9 19v-6h6v6" />
       </svg>
       Shipments
-    </a>
+    </Link>
 
-    <a
+    <Link
       href="/dashboard/inventory"
       className="flex items-center gap-2 rounded-xl bg-[#eef6ff] px-4 py-3 text-sm font-semibold text-[#111827]"
     >
@@ -347,9 +348,9 @@ const RowPrintIcon = () => (
         <path d="M4 18h16" />
       </svg>
       FBA Inventory
-    </a>
+    </Link>
 
-    <a
+    <Link
       href="/dashboard/drafts"
       className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
     >
@@ -358,9 +359,9 @@ const RowPrintIcon = () => (
         <path d="M14 5v6h6" />
       </svg>
       Draft Shipments
-    </a>
+    </Link>
 
-    <a
+    <Link
       href="/dashboard/fba"
       className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
     >
@@ -369,9 +370,9 @@ const RowPrintIcon = () => (
         <path d="M8 20h8" />
       </svg>
       FBA Shipments
-    </a>
+    </Link>
 
-    <a
+    <Link
       href="/dashboard/shipped"
       className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
     >
@@ -382,7 +383,7 @@ const RowPrintIcon = () => (
         <circle cx="18.5" cy="18.5" r="1.5" />
       </svg>
       Shipped to Amazon
-    </a>
+    </Link>
   </div>
 </div>
   </div>

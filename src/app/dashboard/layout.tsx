@@ -459,7 +459,7 @@ const filteredItems = useMemo(() => {
  
   {/* Left help button */}
 <div
-  className="relative flex w-[60px] shrink-0 items-center justify-center"
+  className="relative flex w-[60px] shrink-0 items-center justify-center overflow-visible"
   style={{ marginLeft: "40px" }}
 >
   <button
@@ -489,9 +489,11 @@ const filteredItems = useMemo(() => {
     />
   </button>
 
-  {helpHovered && (
+  {helpHovered &&
+  typeof document !== "undefined" &&
+  createPortal(
     <div
-      className="pointer-events-none fixed z-[2147483647] -translate-x-1/2"
+      className="pointer-events-none fixed z-[99999] -translate-x-1/2"
       style={{
         left: `${helpTooltipPos.x}px`,
         top: `${helpTooltipPos.y}px`,
@@ -500,7 +502,8 @@ const filteredItems = useMemo(() => {
       <div className="whitespace-nowrap rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-black shadow-lg">
         Help Center
       </div>
-    </div>
+    </div>,
+    document.body
   )}
 </div>
 

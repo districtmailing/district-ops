@@ -212,6 +212,82 @@ function buildDefaultPoName(supplier: string, sheetName: string) {
   return `${deriveSupplierPoPrefix(supplier, sheetName)}${formatPoDateMmDdYy()}`;
 }
 
+function qaParseMoney(raw: string): number | null {
+  const t = raw.replace(/[$,%\s]/g, "").trim();
+  if (!t) return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+
+function qaFormatMoney(n: number | null, digits = 2): string {
+  if (n === null || !Number.isFinite(n)) return "—";
+  return n.toFixed(digits);
+}
+
+function qaFormatPct(n: number | null, digits = 2): string {
+  if (n === null || !Number.isFinite(n)) return "—";
+  return `${n.toFixed(digits)}%`;
+}
+
+function qaCalcPmr(
+  sellEach: number | null,
+  eachCost: number | null,
+  discountEach = 0
+): { p: number | null; pm: number | null; roi: number | null } {
+  if (sellEach === null || eachCost === null) return { p: null, pm: null, roi: null };
+  const cost = eachCost - discountEach;
+  const p = sellEach - cost;
+  const pm = sellEach !== 0 ? (p / sellEach) * 100 : null;
+  const roi = cost !== 0 ? (p / cost) * 100 : null;
+  return { p, pm, roi };
+}
+
+function QuickCostInputRow({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <label className="block rounded-md border border-gray-200 bg-white px-2 py-1 shadow-sm">
+      <span className="mb-0.5 block text-[9px] font-bold uppercase tracking-wide text-gray-500">{label}</span>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-7 w-full border-0 bg-transparent text-[12px] font-semibold tabular-nums text-[#111827] outline-none"
+      />
+    </label>
+  );
+}
+
+function QuickCostValuePill({
+  label,
+  value,
+  isPct,
+}: {
+  label: string;
+  value: string;
+  isPct?: boolean;
+}) {
+  const raw = isPct ? parseFloat(value.replace("%", "")) : parseFloat(value);
+  const neg = Number.isFinite(raw) && raw < 0;
+  return (
+    <div className="flex items-center justify-between gap-1.5 border-b border-gray-100 px-2 py-1.5 last:border-b-0">
+      <span className="text-[10px] font-bold uppercase tracking-wide text-gray-500">{label}</span>
+      <span
+        className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums ${
+          neg ? "bg-rose-100 text-rose-800" : "bg-slate-100 text-slate-800"
+        }`}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
 export default function SupplierSheetDetailPage() {
     const sheetColumns = "2.1fr 1fr 1fr 0.75fr 0.9fr";
   const params = useParams();
@@ -235,6 +311,12 @@ const renameTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     null
   );
   const [itemModalSelectedPo, setItemModalSelectedPo] = useState("");
+  const [quickWantCase, setQuickWantCase] = useState("");
+  const [quickWantEach, setQuickWantEach] = useState("");
+  const [quickWantDisc, setQuickWantDisc] = useState("0");
+  const [quickNeedCase, setQuickNeedCase] = useState("");
+  const [quickNeedEach, setQuickNeedEach] = useState("");
+  const [quickNeedDisc, setQuickNeedDisc] = useState("0");
   const [createPoModalOpen, setCreatePoModalOpen] = useState(false);
   const [newPoName, setNewPoName] = useState("");
   const [listPage, setListPage] = useState(1);
@@ -281,6 +363,50 @@ const renameTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     if (!sheet || !itemDetailsModalRowId) return null;
     return sheet.uploadedRows.find((r) => r.id === itemDetailsModalRowId) ?? null;
   }, [sheet, itemDetailsModalRowId]);
+
+  useEffect(() => {
+    if (!itemDetailRow) return;
+    const cost = itemDetailRow.cost || "";
+    const asinCostRaw =
+      itemDetailRow.amazonMatch?.asinCost?.replace(/^\$/, "").trim() || cost;
+    setQuickWantCase(cost);
+    setQuickWantEach(cost);
+    setQuickWantDisc("0");
+    setQuickNeedCase(cost);
+    setQuickNeedEach(asinCostRaw);
+    setQuickNeedDisc("0");
+  }, [itemDetailsModalRowId, itemDetailRow]);
+
+  const quickSellEach = useMemo(() => {
+    if (!itemDetailRow?.amazonMatch?.buyBox) return null;
+    return qaParseMoney(itemDetailRow.amazonMatch.buyBox);
+  }, [itemDetailRow]);
+
+  const quickWantEachDerived = useMemo(() => {
+    if (!itemDetailRow) return qaParseMoney(quickWantEach);
+    const caseN = qaParseMoney(quickWantCase);
+    const cp = parseFloat(String(itemDetailRow.casePack || "1").replace(/,/g, ""));
+    if (caseN !== null && Number.isFinite(cp) && cp > 0) return caseN / cp;
+    return qaParseMoney(quickWantEach);
+  }, [itemDetailRow, quickWantCase, quickWantEach]);
+
+  const quickNeedEachDerived = useMemo(() => {
+    if (!itemDetailRow) return qaParseMoney(quickNeedEach);
+    const caseN = qaParseMoney(quickNeedCase);
+    const cp = parseFloat(String(itemDetailRow.casePack || "1").replace(/,/g, ""));
+    if (caseN !== null && Number.isFinite(cp) && cp > 0) return caseN / cp;
+    return qaParseMoney(quickNeedEach);
+  }, [itemDetailRow, quickNeedCase, quickNeedEach]);
+
+  const quickWantMetrics = useMemo(() => {
+    const disc = qaParseMoney(quickWantDisc) || 0;
+    return qaCalcPmr(quickSellEach, quickWantEachDerived, disc);
+  }, [quickSellEach, quickWantEachDerived, quickWantDisc]);
+
+  const quickNeedMetrics = useMemo(() => {
+    const disc = qaParseMoney(quickNeedDisc) || 0;
+    return qaCalcPmr(quickSellEach, quickNeedEachDerived, disc);
+  }, [quickSellEach, quickNeedEachDerived, quickNeedDisc]);
 
   useEffect(() => {
     if (itemDetailsModalRowId) setItemModalSelectedPo("");
@@ -774,7 +900,7 @@ const updateAmazonMatchField = (
 <div className="min-w-0 px-2.5 py-2">
   <div className="flex h-[128px] min-h-[128px] min-w-0 items-stretch gap-2 overflow-hidden">
     {/* IMAGE BOX */}
-    <div className="h-[122px] w-[112px] shrink-0 self-center overflow-hidden rounded-xl border-2 border-[#16a34a] bg-white shadow-sm">
+    <div className="h-[122px] w-[102px] shrink-0 self-center overflow-hidden rounded-xl border-2 border-[#16a34a] bg-white shadow-sm">
       <div className="relative flex h-full min-h-0 items-center justify-center bg-[#f6f7f4] p-0.5">
         <button
           type="button"
@@ -797,7 +923,7 @@ const updateAmazonMatchField = (
           </svg>
         </button>
 
-        <div className="flex h-[96px] w-[92px] items-center justify-center">
+        <div className="flex h-[96px] w-[84px] items-center justify-center">
           <svg
             viewBox="0 0 24 24"
             fill="none"
@@ -921,7 +1047,7 @@ const updateAmazonMatchField = (
 </div>
 
     {/* ITEM / SIZE BOX */}
-<div className="h-[122px] w-[112px] shrink-0 self-center overflow-hidden rounded-xl border border-[#cfd8cc] bg-white shadow-sm">
+<div className="h-[122px] w-[102px] shrink-0 self-center overflow-hidden rounded-xl border border-[#cfd8cc] bg-white shadow-sm">
   <div className="grid h-full min-h-0 grid-rows-[1fr_1fr]">
     {/* ITEM ROW */}
     <div className="border-b border-[#cfd5cd] bg-white px-2 py-2">
@@ -1191,9 +1317,9 @@ const updateAmazonMatchField = (
   <div className="flex h-[128px] min-h-[128px] w-full min-w-0 items-stretch gap-2 overflow-hidden">
     
     {/* AMAZON IMAGE BOX */}
-    <div className="h-[122px] w-[112px] shrink-0 self-center overflow-hidden rounded-xl border-2 border-[#f59e0b] bg-white shadow-sm">
+    <div className="h-[122px] w-[102px] shrink-0 self-center overflow-hidden rounded-xl border-2 border-[#f59e0b] bg-white shadow-sm">
       <div className="relative flex h-full min-h-0 items-center justify-center bg-white p-0.5">
-        <div className="flex h-[96px] w-[92px] items-center justify-center">
+        <div className="flex h-[96px] w-[84px] items-center justify-center">
           {row.amazonMatch?.image ? (
             <img
               src={row.amazonMatch.image}
@@ -1297,7 +1423,7 @@ const updateAmazonMatchField = (
 </div>
 
     {/* PACK SIZE / BUY BOX BOXES */}
-    <div className="grid h-[122px] w-[112px] shrink-0 grid-rows-2 gap-2 self-center">
+    <div className="grid h-[122px] w-[102px] shrink-0 grid-rows-2 gap-2 self-center">
       <div className="min-h-0 w-full overflow-hidden rounded-2xl border-2 border-[#15803d] bg-white px-2 py-2 shadow-sm">
         <p className="truncate text-[11px] font-semibold leading-tight text-gray-500">Pack Size:</p>
         <p className="truncate text-[13px] font-semibold leading-tight text-[#334155]">
@@ -1468,7 +1594,7 @@ const updateAmazonMatchField = (
 
 {/* COLUMN 4 — INFO */}
 <div className="border-l border-[#d7dde7] px-2.5 py-2">
-  <div className="flex h-[128px] min-h-[128px] w-full items-start justify-start gap-3 pt-4 pl-5">
+  <div className="flex h-[128px] min-h-[128px] w-full items-start justify-start gap-2 pl-0.5 pt-0.5">
     <button
       type="button"
       title="View Product"
@@ -1506,14 +1632,14 @@ const updateAmazonMatchField = (
 {/* COLUMN 5 — ASIN */}
 <div className="border-l border-[#d7dde7] px-2.5 py-2">
   <div
-    className="grid h-[128px] min-h-[128px] w-full min-w-0 grid-rows-[1fr_1fr] gap-2 overflow-hidden"
-    style={{ gridTemplateRows: "minmax(0, 1fr) minmax(0, 1fr)" }}
+    className="grid h-[128px] min-h-[128px] w-full min-w-0 gap-2 overflow-hidden"
+    style={{ gridTemplateRows: "minmax(0, 1fr) auto" }}
   >
 
     {/* TOP ASIN / SALES RANK BOX */}
-    <div className="min-h-0 overflow-hidden rounded-2xl border border-[#cfd8cc] bg-white shadow-sm">
+    <div className="flex min-h-0 h-full flex-col overflow-hidden rounded-2xl border border-[#cfd8cc] bg-white shadow-sm">
       {/* ASIN ROW */}
-      <div className="flex min-h-0 flex-nowrap items-center justify-between gap-1 whitespace-nowrap border-b border-[#d7dde7] px-2 py-1.5">
+      <div className="flex shrink-0 flex-nowrap items-center justify-between gap-1 whitespace-nowrap border-b border-[#d7dde7] px-2.5 py-2">
         <span className="min-w-0 truncate rounded-md bg-[#ffbd6b] px-1.5 py-0.5 text-[11px] font-bold leading-none text-black">
           {row.amazonMatch?.asin || "B07F35ZMYM"}
         </span>
@@ -1554,14 +1680,14 @@ const updateAmazonMatchField = (
       </div>
 
       {/* SALES RANK / CATEGORY ROW */}
-      <div className="grid min-h-0 grid-cols-[36px_minmax(0,1fr)]">
-        <div className="flex items-center justify-center border-r border-[#d7dde7] bg-white py-0.5">
+      <div className="grid min-h-0 flex-1 grid-cols-[36px_minmax(0,1fr)] items-stretch">
+        <div className="flex min-h-0 items-center justify-center border-r border-[#d7dde7] bg-white px-0 py-2">
           <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#facc15] text-[11px] text-white">
             ★
           </span>
         </div>
 
-        <div className="flex min-h-0 min-w-0 items-center justify-between gap-1 bg-[#f8faf7] px-1.5 py-0.5">
+        <div className="flex min-h-0 min-w-0 items-center justify-between gap-1 bg-[#f8faf7] px-2 py-2">
           <span className="min-w-0 truncate text-[11px] font-medium leading-tight text-[#334155]">
             {row.amazonMatch?.salesRank || "782"} - {row.amazonMatch?.tags || "Kitchen"}
           </span>
@@ -1576,7 +1702,7 @@ const updateAmazonMatchField = (
     <button
   type="button"
   onClick={() => setItemDetailsModalRowId(row.id)}
-  className="flex h-full min-h-0 flex-nowrap cursor-pointer items-center justify-center gap-1 overflow-hidden whitespace-nowrap rounded-2xl px-2 py-1.5 text-[12px] font-semibold leading-none text-white shadow-sm"
+  className="flex h-9 min-h-0 shrink-0 flex-nowrap cursor-pointer items-center justify-center gap-1 overflow-hidden whitespace-nowrap rounded-2xl px-2 py-1 text-[12px] font-semibold leading-none text-white shadow-sm"
   style={{
     backgroundColor: "#43586a",
     boxShadow: "inset 0 0 0 9999px #43586a",
@@ -1996,30 +2122,48 @@ const updateAmazonMatchField = (
               </div>
 
               <div className="mt-2 grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
-                <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-                  <div className="flex h-8 shrink-0 items-center border-b border-gray-200 bg-[#fafafa] px-2">
-                    <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-sky-200/90 bg-white shadow-sm">
+                  <div className="shrink-0 border-b border-gray-200 bg-gradient-to-r from-sky-50 via-white to-white px-2 py-1.5">
+                    <span className="text-[10px] font-bold uppercase tracking-[0.06em] text-sky-900/90">
                       Want Cost
                     </span>
                   </div>
-                  <div className="px-2 py-2">
-                    <p className="text-lg font-bold tabular-nums text-[#0f172a]">${itemDetailRow.cost || "—"}</p>
+                  <div className="grid min-h-0 min-w-0 flex-1 grid-cols-2 divide-x divide-gray-200">
+                    <div className="flex min-w-0 flex-col gap-1.5 bg-[#f8fafc] p-2">
+                      <QuickCostInputRow label="Case ($)" value={quickWantCase} onChange={setQuickWantCase} />
+                      <QuickCostInputRow label="Each ($)" value={quickWantEach} onChange={setQuickWantEach} />
+                      <QuickCostInputRow label="Discount" value={quickWantDisc} onChange={setQuickWantDisc} />
+                    </div>
+                    <div className="flex min-w-0 flex-col bg-white">
+                      <div className="shrink-0 border-b border-gray-100 bg-[#fafafa] px-2 py-1 text-center">
+                        <span className="text-[9px] font-bold uppercase tracking-wide text-gray-500">Result</span>
+                      </div>
+                      <QuickCostValuePill label="P" value={qaFormatMoney(quickWantMetrics.p)} />
+                      <QuickCostValuePill label="PM" value={qaFormatPct(quickWantMetrics.pm)} isPct />
+                      <QuickCostValuePill label="ROI" value={qaFormatPct(quickWantMetrics.roi)} isPct />
+                    </div>
                   </div>
                 </div>
-                <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-                  <div className="flex h-8 shrink-0 items-center border-b border-gray-200 bg-[#fafafa] px-2">
-                    <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-violet-200/90 bg-white shadow-sm">
+                  <div className="shrink-0 border-b border-gray-200 bg-gradient-to-r from-violet-50 via-white to-white px-2 py-1.5">
+                    <span className="text-[10px] font-bold uppercase tracking-[0.06em] text-violet-900/90">
                       Need Cost
                     </span>
                   </div>
-                  <div className="px-2 py-2">
-                    <p className="text-lg font-bold tabular-nums text-[#0f172a]">
-                      {itemDetailRow.amazonMatch?.asinCost
-                        ? itemDetailRow.amazonMatch.asinCost.startsWith("$")
-                          ? itemDetailRow.amazonMatch.asinCost
-                          : `$${itemDetailRow.amazonMatch.asinCost}`
-                        : "—"}
-                    </p>
+                  <div className="grid min-h-0 min-w-0 flex-1 grid-cols-2 divide-x divide-gray-200">
+                    <div className="flex min-w-0 flex-col gap-1.5 bg-[#f8fafc] p-2">
+                      <QuickCostInputRow label="Case ($)" value={quickNeedCase} onChange={setQuickNeedCase} />
+                      <QuickCostInputRow label="Each ($)" value={quickNeedEach} onChange={setQuickNeedEach} />
+                      <QuickCostInputRow label="Discount" value={quickNeedDisc} onChange={setQuickNeedDisc} />
+                    </div>
+                    <div className="flex min-w-0 flex-col bg-white">
+                      <div className="shrink-0 border-b border-gray-100 bg-[#fafafa] px-2 py-1 text-center">
+                        <span className="text-[9px] font-bold uppercase tracking-wide text-gray-500">Result</span>
+                      </div>
+                      <QuickCostValuePill label="P" value={qaFormatMoney(quickNeedMetrics.p)} />
+                      <QuickCostValuePill label="PM" value={qaFormatPct(quickNeedMetrics.pm)} isPct />
+                      <QuickCostValuePill label="ROI" value={qaFormatPct(quickNeedMetrics.roi)} isPct />
+                    </div>
                   </div>
                 </div>
                 <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">

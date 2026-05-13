@@ -259,6 +259,7 @@ const filteredItems = useMemo(() => {
     <main className="min-h-screen bg-[#f6f8fb] text-[#111827]">
       <div
   className="flex min-h-screen w-full"
+  data-dashboard-sidebar-collapsed={collapsed ? "true" : "false"}
   style={
     {
       "--sidebar-width": collapsed ? "88px" : "280px",
@@ -283,8 +284,9 @@ const filteredItems = useMemo(() => {
 
             {!collapsed && (
               <button
+                type="button"
                 onClick={() => setCollapsed(true)}
-                className="rounded-xl border border-gray-200 bg-white p-2 text-gray-500 hover:bg-gray-50 hover:text-gray-800"
+                className="cursor-pointer rounded-xl border border-gray-200 bg-white p-2 text-gray-500 transition hover:bg-gray-50 hover:text-gray-800"
                 aria-label="Collapse sidebar"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -297,8 +299,9 @@ const filteredItems = useMemo(() => {
           {collapsed && (
             <div className="flex justify-center border-b border-gray-200 px-3 py-4">
               <button
+                type="button"
                 onClick={() => setCollapsed(false)}
-                className="rounded-xl border border-gray-200 bg-white p-2 text-gray-500 hover:bg-gray-50 hover:text-gray-800"
+                className="cursor-pointer rounded-xl border border-gray-200 bg-white p-2 text-gray-500 transition hover:bg-gray-50 hover:text-gray-800"
                 aria-label="Expand sidebar"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -308,7 +311,9 @@ const filteredItems = useMemo(() => {
             </div>
           )}
 
-          <div className={`flex-1 space-y-6 overflow-y-auto overflow-x-visible py-6 ${collapsed ? "px-3" : "px-4"}`}>
+          <div
+            className={`dashboard-sidebar-scroll flex-1 space-y-6 overflow-y-auto overflow-x-visible py-6 ${collapsed ? "px-3" : "px-4"}`}
+          >
             <div>
               <SectionLabel collapsed={collapsed}>Dashboard</SectionLabel>
               <div className="space-y-1">
@@ -385,12 +390,6 @@ const filteredItems = useMemo(() => {
             <div>
               <SectionLabel collapsed={collapsed}>Admin</SectionLabel>
               <div className="space-y-1">
-                <NavItem
-                  href="/dashboard/team"
-                  label="Team"
-                  collapsed={collapsed}
-                  icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>}
-                />
                 <NavItem
                   href="/dashboard/settings"
                   label="Settings"
@@ -594,7 +593,7 @@ const filteredItems = useMemo(() => {
       setSearchOpen(false);
       setSearchQuery("");
     }}
-    className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+    className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40"
   >
     <div
   onClick={(e) => e.stopPropagation()}

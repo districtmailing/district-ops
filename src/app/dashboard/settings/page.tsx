@@ -1,8 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import type { ChangeEventHandler } from "react";
+import { useEffect, useRef, useState } from "react";
 import { acceptPendingTeamInviteForUser } from "@/lib/acceptTeamInvite";
 import { supabase } from "@/lib/supabase";
+
+const COMPANY_LOGOS_BUCKET =
+  process.env.NEXT_PUBLIC_SUPABASE_COMPANY_LOGOS_BUCKET ?? "company-logos";
 
 type SettingsTab =
   | "profile"
@@ -367,13 +371,13 @@ setTeamMembers([...activeMembers, ...pendingMembers]);
           </p>
         </div>
 
-        <div className="mb-5 overflow-x-auto">
+        <div className="mb-5 flex justify-center overflow-x-auto">
           <div className="inline-flex w-max min-w-0 gap-2 rounded-3xl border border-gray-200 bg-white p-2 shadow-sm">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`whitespace-nowrap rounded-2xl px-5 py-3 text-[15px] font-semibold transition ${
+                className={`whitespace-nowrap cursor-pointer rounded-2xl px-5 py-3 text-[15px] font-semibold transition ${
                   activeTab === tab.id
                     ? "bg-[#2F80ED] text-white shadow-sm"
                     : "text-gray-600 hover:bg-[#f3f4f6] hover:text-[#111827]"
@@ -387,7 +391,9 @@ setTeamMembers([...activeMembers, ...pendingMembers]);
 
         <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm lg:p-7">
           {activeTab === "profile" && <ProfileSection currentUser={currentUser} />}
-          {activeTab === "company" && <CompanySection />}
+          {activeTab === "company" && (
+            <CompanySection teamScopeId={currentTeamId} />
+          )}
           {activeTab === "team" && (
   <TeamSection
   teamMembers={teamMembers}
@@ -427,7 +433,7 @@ setTeamMembers([...activeMembers, ...pendingMembers]);
         <select
           value={inviteRole}
           onChange={(e) => setInviteRole(e.target.value)}
-          className="w-full rounded-xl border border-gray-300 px-4 py-3"
+          className="w-full cursor-pointer rounded-xl border border-gray-300 px-4 py-3"
         >
           <option value="viewer">Viewer</option>
           <option value="buyer">Buyer</option>
@@ -436,7 +442,7 @@ setTeamMembers([...activeMembers, ...pendingMembers]);
 
         <button
           onClick={handleInvite}
-          className="w-full rounded-xl bg-[#2F80ED] py-3 font-semibold text-white"
+          className="w-full cursor-pointer rounded-xl bg-[#2F80ED] py-3 font-semibold text-white"
         >
           Send Invite
         </button>
@@ -471,7 +477,7 @@ setTeamMembers([...activeMembers, ...pendingMembers]);
         <select
           value={manageRole}
           onChange={(e) => setManageRole(e.target.value)}
-          className="w-full rounded-xl border border-gray-300 px-4 py-3"
+          className="w-full cursor-pointer rounded-xl border border-gray-300 px-4 py-3"
         >
           <option value="viewer">Viewer</option>
           <option value="buyer">Buyer</option>
@@ -481,7 +487,7 @@ setTeamMembers([...activeMembers, ...pendingMembers]);
 
         <button
           onClick={handleUpdateRole}
-          className="w-full rounded-xl bg-[#2F80ED] py-3 font-semibold text-white"
+          className="w-full cursor-pointer rounded-xl bg-[#2F80ED] py-3 font-semibold text-white"
         >
           Save Role
         </button>
@@ -489,7 +495,7 @@ setTeamMembers([...activeMembers, ...pendingMembers]);
         <button
   onClick={handleRemoveMember}
   style={{ backgroundColor: "#dc2626" }}
-  className="w-full rounded-xl py-3 font-semibold text-white"
+  className="w-full cursor-pointer rounded-xl py-3 font-semibold text-white"
 >
   Delete Rep
 </button>
@@ -520,21 +526,41 @@ function Input({
   label,
   placeholder,
   defaultValue = "",
+  value,
+  onChange,
   type = "text",
+  disabled,
+  compact,
 }: {
   label: string;
   placeholder?: string;
   defaultValue?: string;
+  value?: string;
+  onChange?: ChangeEventHandler<HTMLInputElement>;
   type?: string;
+  disabled?: boolean;
+  compact?: boolean;
 }) {
+  const controlled = value !== undefined;
   return (
     <label className="block">
-      <span className="mb-2 block text-sm font-medium text-gray-700">{label}</span>
+      <span
+        className={`block font-medium text-gray-700 ${compact ? "mb-1 text-[13px]" : "mb-2 text-sm"}`}
+      >
+        {label}
+      </span>
       <input
         type={type}
-        defaultValue={defaultValue}
+        {...(controlled
+          ? { value, onChange }
+          : { defaultValue })}
         placeholder={placeholder}
-        className="h-14 w-full rounded-2xl border border-gray-300 bg-[#f8fafc] px-4 text-[16px] text-[#111827] outline-none placeholder:text-gray-400 focus:border-[var(--brand-blue)] focus:bg-white"
+        disabled={disabled}
+        className={`w-full border border-gray-300 bg-[#f8fafc] text-[#111827] outline-none placeholder:text-gray-400 focus:border-[var(--brand-blue)] focus:bg-white disabled:cursor-not-allowed disabled:opacity-60 ${
+          compact
+            ? "h-11 rounded-xl px-3 text-[15px]"
+            : "h-14 rounded-2xl px-4 text-[16px]"
+        }`}
       />
     </label>
   );
@@ -544,27 +570,62 @@ function Textarea({
   label,
   placeholder,
   defaultValue = "",
+  value,
+  onChange,
+  disabled,
+  rows = 4,
+  compact,
 }: {
   label: string;
   placeholder?: string;
   defaultValue?: string;
+  value?: string;
+  onChange?: ChangeEventHandler<HTMLTextAreaElement>;
+  disabled?: boolean;
+  rows?: number;
+  compact?: boolean;
 }) {
+  const controlled = value !== undefined;
   return (
     <label className="block">
-      <span className="mb-2 block text-sm font-medium text-gray-700">{label}</span>
+      <span
+        className={`block font-medium text-gray-700 ${compact ? "mb-1 text-[13px]" : "mb-2 text-sm"}`}
+      >
+        {label}
+      </span>
       <textarea
-        defaultValue={defaultValue}
+        {...(controlled
+          ? { value, onChange }
+          : { defaultValue })}
         placeholder={placeholder}
-        rows={4}
-        className="w-full rounded-2xl border border-gray-300 bg-[#f8fafc] px-4 py-4 text-[16px] text-[#111827] outline-none placeholder:text-gray-400 focus:border-[var(--brand-blue)] focus:bg-white"
+        rows={rows}
+        disabled={disabled}
+        className={`w-full border border-gray-300 bg-[#f8fafc] text-[#111827] outline-none placeholder:text-gray-400 focus:border-[var(--brand-blue)] focus:bg-white disabled:cursor-not-allowed disabled:opacity-60 ${
+          compact
+            ? "rounded-xl px-3 py-2.5 text-[15px] leading-snug"
+            : "rounded-2xl px-4 py-4 text-[16px]"
+        }`}
       />
     </label>
   );
 }
 
-function SaveButton({ children = "Save Changes" }: { children?: string }) {
+function SaveButton({
+  children = "Save Changes",
+  onClick,
+  disabled,
+}: {
+  children?: string;
+  onClick?: () => void;
+  disabled?: boolean;
+}) {
   return (
-    <button className="rounded-2xl bg-[#2F80ED] px-6 py-3 text-base font-semibold text-white transition hover:opacity-90">
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="cursor-pointer rounded-2xl bg-[#2F80ED] px-6 py-3 text-base font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+    >
       {children}
     </button>
   );
@@ -608,43 +669,294 @@ function ProfileSection({ currentUser }: { currentUser: CurrentUser }) {
   );
 }
 
-function CompanySection() {
+async function uploadCompanyLogo(
+  userId: string,
+  file: File
+): Promise<{ publicUrl: string } | { error: string }> {
+  const safeName = file.name.replace(/[^\w.\-]/g, "_") || "logo";
+  const path = `${userId}/${Date.now()}_${safeName}`;
+  const { error } = await supabase.storage.from(COMPANY_LOGOS_BUCKET).upload(path, file, {
+    cacheControl: "3600",
+    upsert: false,
+    contentType: file.type || "image/jpeg",
+  });
+  if (error) {
+    console.error("Company logo upload error:", error);
+    return { error: error.message };
+  }
+  const { data } = supabase.storage.from(COMPANY_LOGOS_BUCKET).getPublicUrl(path);
+  return { publicUrl: data.publicUrl };
+}
+
+function CompanySection({ teamScopeId }: { teamScopeId: string | null }) {
+  const [companyName, setCompanyName] = useState("");
+  const [address, setAddress] = useState("");
+  const [phone, setPhone] = useState("");
+  const [website, setWebsite] = useState("");
+  const [logoUrl, setLogoUrl] = useState("");
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [pendingLogoFile, setPendingLogoFile] = useState<File | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [loadingSettings, setLoadingSettings] = useState(true);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadCompanySettings = async () => {
+      setLoadingSettings(true);
+      if (!teamScopeId) {
+        setCompanyName("");
+        setAddress("");
+        setPhone("");
+        setWebsite("");
+        setLogoUrl("");
+        setLoadingSettings(false);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("team_company_settings")
+        .select("company_name, address, phone, website, logo_url")
+        .eq("team_id", teamScopeId)
+        .maybeSingle();
+
+      if (cancelled) return;
+
+      if (error) {
+        console.error("Error loading team company settings:", error);
+        setCompanyName("");
+        setAddress("");
+        setPhone("");
+        setWebsite("");
+        setLogoUrl("");
+        setLoadingSettings(false);
+        return;
+      }
+
+      if (!data) {
+        setCompanyName("");
+        setAddress("");
+        setPhone("");
+        setWebsite("");
+        setLogoUrl("");
+        setLoadingSettings(false);
+        return;
+      }
+
+      setCompanyName(data.company_name ?? "");
+      setAddress(data.address ?? "");
+      setPhone(data.phone ?? "");
+      setWebsite(data.website ?? "");
+      setLogoUrl(data.logo_url ?? "");
+      setLoadingSettings(false);
+    };
+
+    void loadCompanySettings();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [teamScopeId]);
+
+  const displayLogoSrc = logoPreview || logoUrl || null;
+
+  const handleLogoInput: ChangeEventHandler<HTMLInputElement> = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      alert("Please choose an image file (JPG, PNG, or WebP).");
+      return;
+    }
+    if (logoPreview) {
+      URL.revokeObjectURL(logoPreview);
+    }
+    setLogoPreview(URL.createObjectURL(file));
+    setPendingLogoFile(file);
+  };
+
+  const clearPendingPreview = () => {
+    if (logoPreview) {
+      URL.revokeObjectURL(logoPreview);
+    }
+    setLogoPreview(null);
+    setPendingLogoFile(null);
+  };
+
+  const handleRemoveLogo = () => {
+    clearPendingPreview();
+    setLogoUrl("");
+  };
+
+  const handleSaveCompany = async () => {
+    if (!teamScopeId) {
+      alert("You need an active team before company settings can be saved.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      const userId = userData.user?.id;
+      if (!userId) {
+        alert("You must be signed in to save company settings.");
+        return;
+      }
+
+      let nextLogoUrl = logoUrl;
+      let logoNotice: string | null = null;
+      if (pendingLogoFile) {
+        const result = await uploadCompanyLogo(userId, pendingLogoFile);
+        if ("error" in result) {
+          logoNotice = `Logo upload failed (${result.error}). Create a public bucket "${COMPANY_LOGOS_BUCKET}" in Supabase Storage if needed.`;
+        } else {
+          nextLogoUrl = result.publicUrl;
+          clearPendingPreview();
+          setLogoUrl(nextLogoUrl);
+        }
+      }
+
+      const { error: upsertError } = await supabase.from("team_company_settings").upsert(
+        {
+          team_id: teamScopeId,
+          company_name: companyName,
+          address,
+          phone,
+          website,
+          logo_url: nextLogoUrl,
+          updated_by: userId,
+        },
+        { onConflict: "team_id" }
+      );
+
+      if (upsertError) {
+        console.error("Error saving team company settings:", upsertError);
+        alert(`Could not save company settings: ${upsertError.message}`);
+        return;
+      }
+
+      alert(
+        logoNotice
+          ? `${logoNotice} Your other company details were saved for the team.`
+          : "Company settings saved."
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
-    <div>
-      <SectionHeading
-        title="Company Settings"
-        subtitle="This information can be used across quotes, reports, and internal records."
-      />
+    <div className="max-w-[920px]">
+      {!teamScopeId && !loadingSettings ? (
+        <p className="mb-2 text-sm text-gray-500">
+          Company settings are available once you belong to a team. Open Settings again after your
+          team has loaded, or finish account setup.
+        </p>
+      ) : null}
 
-      <div className="grid gap-4 md:max-w-[820px]">
-        <Card>
-          <div className="flex items-center gap-4">
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white text-gray-400 shadow-sm">
-              Logo
-            </div>
-            <div>
-              <p className="text-base font-medium text-[#111827]">Company Logo</p>
-              <p className="mt-1 text-sm text-gray-500">
-                Upload JPG, PNG, WebP, or PDF
-              </p>
-            </div>
-          </div>
-        </Card>
+      <h2 className="text-lg font-semibold tracking-tight text-[#111827] md:text-xl">
+        Company Settings
+      </h2>
+      <p className="mt-1 text-sm leading-snug text-gray-500">
+        This information can be used across quotes, reports, and internal records.
+      </p>
 
-        <Input label="Company Name" defaultValue="District Mailing LLC" />
+      <div className="mt-3 grid gap-2 md:mt-4 md:gap-2.5">
+        <div className="grid gap-2 sm:grid-cols-2 sm:items-end">
+          <Input
+            label="Company name"
+            value={companyName}
+            onChange={(e) => setCompanyName(e.target.value)}
+            disabled={loadingSettings}
+            compact
+          />
+          <Input
+            label="Phone"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            disabled={loadingSettings}
+            compact
+          />
+        </div>
+
         <Textarea
           label="Address"
-          defaultValue={"123 Business St\nSuite 100\nCity, State 12345"}
+          value={address}
+          onChange={(e) => setAddress(e.target.value)}
+          disabled={loadingSettings}
+          rows={2}
+          compact
         />
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <Input label="Phone" placeholder="(555) 123-4567" />
-          <Input label="Website" placeholder="https://yourcompany.com" />
+        <div className="grid gap-2 md:grid-cols-2 md:items-stretch">
+          <div className="min-h-0 min-w-0">
+            <Input
+              label="Website"
+              value={website}
+              onChange={(e) => setWebsite(e.target.value)}
+              disabled={loadingSettings}
+              compact
+            />
+          </div>
+
+          <div className="flex h-full min-h-0 min-w-0">
+            <div className="flex h-full w-full flex-nowrap items-center gap-4 rounded-xl border border-gray-200 bg-[#f8fafc] px-3 py-2">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-white">
+                {displayLogoSrc ? (
+                  <img
+                    src={displayLogoSrc}
+                    alt="Company logo preview"
+                    className="max-h-full max-w-full object-contain"
+                  />
+                ) : (
+                  <span className="text-[10px] font-medium text-gray-400">—</span>
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-semibold leading-tight text-[#111827]">Logo</p>
+                <p className="text-[11px] leading-snug text-gray-500">JPG, PNG, or WebP</p>
+              </div>
+              <div className="flex shrink-0 flex-nowrap items-center gap-1.5">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={handleLogoInput}
+                  disabled={loadingSettings || !teamScopeId}
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={loadingSettings || !teamScopeId}
+                  className="cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-[#111827] transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Upload
+                </button>
+                {(displayLogoSrc || logoUrl) && (
+                  <button
+                    type="button"
+                    onClick={handleRemoveLogo}
+                    disabled={loadingSettings || !teamScopeId}
+                    className="cursor-pointer rounded-lg px-2.5 py-1.5 text-xs font-semibold text-gray-600 transition hover:bg-gray-200/60 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="mt-6">
-        <SaveButton>Save Company Settings</SaveButton>
+      <div className="mt-3 flex justify-start md:mt-4">
+        <SaveButton
+          onClick={handleSaveCompany}
+          disabled={saving || loadingSettings || !teamScopeId}
+        >
+          {saving ? "Saving…" : "Save Company Settings"}
+        </SaveButton>
       </div>
     </div>
   );
@@ -745,7 +1057,7 @@ function TeamSection({
 
             <button
   onClick={onInviteClick}
-  className="rounded-2xl bg-[#2F80ED] px-5 py-3 font-medium text-white"
+  className="cursor-pointer rounded-2xl bg-[#2F80ED] px-5 py-3 font-medium text-white"
 >
   Invite Member
 </button>
@@ -831,7 +1143,7 @@ function TeamSection({
                       <td className="py-5 text-right">
                         <button
   onClick={() => onManageClick(member)}
-  className="text-gray-500 hover:text-[#111827]"
+  className="cursor-pointer text-gray-500 hover:text-[#111827]"
 >
   Manage
 </button>
@@ -975,13 +1287,13 @@ function AppearanceSection() {
       />
 
       <div className="grid max-w-[780px] gap-5 md:grid-cols-2">
-        <button className="rounded-3xl border border-gray-200 bg-white p-8 text-left shadow-sm">
+        <button type="button" className="cursor-pointer rounded-3xl border border-gray-200 bg-white p-8 text-left shadow-sm">
           <div className="text-3xl">🌙</div>
           <div className="mt-6 text-2xl font-semibold text-[#111827]">Dark Mode</div>
           <div className="mt-2 text-gray-500">Alternative</div>
         </button>
 
-        <button className="rounded-3xl border-2 border-[var(--brand-blue)] bg-blue-50 p-8 text-left">
+        <button type="button" className="cursor-pointer rounded-3xl border-2 border-[var(--brand-blue)] bg-blue-50 p-8 text-left">
           <div className="text-3xl">☀️</div>
           <div className="mt-6 text-2xl font-semibold text-[#111827]">Light Mode</div>
           <div className="mt-2 text-gray-500">Default</div>

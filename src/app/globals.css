@@ -27,3 +27,22 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Dashboard sidebar only — dark scrollbar */
+.dashboard-sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #111827 #e5e7eb;
+}
+.dashboard-sidebar-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.dashboard-sidebar-scroll::-webkit-scrollbar-track {
+  background: #e5e7eb;
+}
+.dashboard-sidebar-scroll::-webkit-scrollbar-thumb {
+  background: #111827;
+  border-radius: 9999px;
+}
+.dashboard-sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: #000000;
+}

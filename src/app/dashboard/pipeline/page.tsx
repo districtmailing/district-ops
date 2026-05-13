@@ -1796,7 +1796,7 @@ useEffect(() => {
 
   <button
     onClick={() => setAddModalOpen(true)}
-    className="rounded-2xl border border-[#4ade80] bg-[#4ade80] px-4 py-3 text-sm font-medium text-white transition hover:opacity-90"
+    className="cursor-pointer rounded-2xl border border-[#4ade80] bg-[#4ade80] px-4 py-3 text-sm font-medium text-white transition hover:opacity-90"
   >
     Add Company
   </button>
@@ -1821,13 +1821,13 @@ useEffect(() => {
     backgroundColor: "#3b82f6",
     borderColor: "#3b82f6",
   }}
-  className="rounded-2xl border px-4 py-3 text-sm font-medium text-white transition hover:opacity-90"
+  className="cursor-pointer rounded-2xl border px-4 py-3 text-sm font-medium text-white transition hover:opacity-90"
 >
   Manage Trade Shows
 </button>
   <button
     onClick={() => importFileRef.current?.click()}
-    className="rounded-2xl border border-gray-300 bg-[#f8f8f8] px-4 py-3 text-sm font-medium text-gray-700 hover:bg-white"
+    className="cursor-pointer rounded-2xl border border-gray-300 bg-[#f8f8f8] px-4 py-3 text-sm font-medium text-gray-700 hover:bg-white"
   >
     Import Sheet
   </button>
@@ -1862,7 +1862,7 @@ useEffect(() => {
             setEditingTradeShowValue("");
             setNewTradeShowName("");
           }}
-          className="rounded-xl px-3 py-2 text-xl text-gray-500 hover:bg-gray-100"
+          className="cursor-pointer rounded-xl px-3 py-2 text-xl text-gray-500 hover:bg-gray-100"
         >
           ×
         </button>
@@ -1883,7 +1883,7 @@ useEffect(() => {
 
           <button
             onClick={addManagedTradeShow}
-            className="rounded-xl border border-green-200 bg-green-50 px-4 py-2 text-sm font-semibold text-green-700 hover:bg-green-100"
+            className="cursor-pointer rounded-xl border border-green-200 bg-green-50 px-4 py-2 text-sm font-semibold text-green-700 hover:bg-green-100"
           >
             Add
           </button>
@@ -1917,7 +1917,7 @@ useEffect(() => {
                 {editingTradeShowName === show ? (
                   <button
                     onClick={saveTradeShowEdit}
-                    className="rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-sm font-semibold text-green-700 hover:bg-green-100"
+                    className="cursor-pointer rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-sm font-semibold text-green-700 hover:bg-green-100"
                   >
                     Save
                   </button>
@@ -1927,7 +1927,7 @@ useEffect(() => {
                       setEditingTradeShowName(show);
                       setEditingTradeShowValue(show);
                     }}
-                    className="rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                    className="cursor-pointer rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
                   >
                     Edit
                   </button>
@@ -1935,7 +1935,7 @@ useEffect(() => {
 
                 <button
                   onClick={() => deleteTradeShow(show)}
-                  className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-100"
+                  className="cursor-pointer rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-100"
                 >
                   Delete
                 </button>
@@ -1973,7 +1973,7 @@ useEffect(() => {
                     setOpenMenuId(null);
                     setDetailsOpen(false);
                   }}
-                  className="h-12 rounded-2xl border border-gray-300 bg-[#f8f8f8] px-4 text-sm text-gray-700 outline-none"
+                  className="h-12 cursor-pointer rounded-2xl border border-gray-300 bg-[#f8f8f8] px-4 text-sm text-gray-700 outline-none"
                 >
                   <option value="TRADESHOW">TRADESHOW</option>
 
@@ -1993,7 +1993,7 @@ useEffect(() => {
                     setOpenMenuId(null);
                     setDetailsOpen(false);
                   }}
-                  className="h-12 rounded-2xl border border-gray-300 bg-[#f8f8f8] px-4 text-sm text-gray-700 outline-none"
+                  className="h-12 cursor-pointer rounded-2xl border border-gray-300 bg-[#f8f8f8] px-4 text-sm text-gray-700 outline-none"
                 >
                   <option value="SALES REP">SALES REP</option>
 
@@ -2009,7 +2009,7 @@ useEffect(() => {
                 <select
                   value={selectedStatus}
                   onChange={(e) => setSelectedStatus(e.target.value)}
-                  className="h-12 rounded-2xl border border-gray-300 bg-[#f8f8f8] px-4 text-sm text-gray-700 outline-none"
+                  className="h-12 cursor-pointer rounded-2xl border border-gray-300 bg-[#f8f8f8] px-4 text-sm text-gray-700 outline-none"
                 >
                   <option value="STATUS">STATUS</option>
 <option value="All Statuses">All Statuses</option>
@@ -2024,7 +2024,7 @@ useEffect(() => {
             <div className="inline-flex rounded-2xl border border-gray-200 bg-[#f8f8f8] p-1">
               <button
                 onClick={() => setCurrentViewMode("cards")}
-                className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
+                className={`cursor-pointer rounded-xl px-4 py-2 text-sm font-medium transition ${
                   currentViewMode === "cards"
                     ? "bg-white text-[#111827] shadow-sm"
                     : "text-gray-500 hover:text-[#111827]"
@@ -2034,7 +2034,7 @@ useEffect(() => {
               </button>
               <button
                 onClick={() => setCurrentViewMode("graph")}
-                className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
+                className={`cursor-pointer rounded-xl px-4 py-2 text-sm font-medium transition ${
                   currentViewMode === "graph"
                     ? "bg-white text-[#111827] shadow-sm"
                     : "text-gray-500 hover:text-[#111827]"
@@ -2121,7 +2121,7 @@ useEffect(() => {
             <div className="mt-5 flex items-center justify-end">
   <button
     onClick={() => setShowCompanyList((prev) => !prev)}
-    className="rounded-2xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+    className="cursor-pointer rounded-2xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
   >
     {showCompanyList ? "Hide Company List" : "Show Company List"}
   </button>
@@ -2151,7 +2151,7 @@ useEffect(() => {
                     {filteredCompanies.map((company) => (
                       <tr
   key={company.id}
-  className="align-middle"
+  className="cursor-pointer align-middle"
   onClick={() => {
   if (openMenuId) {
     setOpenMenuId(null);
@@ -2206,7 +2206,7 @@ useEffect(() => {
         width: rect.width,
       });
     }}
-    className={`inline-flex min-w-[148px] items-center justify-center rounded-full px-4 py-2 text-center text-xs font-semibold leading-none shadow-sm transition duration-150 hover:scale-[1.02] hover:shadow ${statusClass(company.status)}`}
+    className={`inline-flex min-w-[148px] cursor-pointer items-center justify-center rounded-full px-4 py-2 text-center text-xs font-semibold leading-none shadow-sm transition duration-150 hover:scale-[1.02] hover:shadow ${statusClass(company.status)}`}
   >
     {company.status}
   </button>
@@ -2226,7 +2226,7 @@ useEffect(() => {
   <button
     key={status}
     onClick={() => updateCompanyStatus(company.id, status)}
-    className={`relative flex w-full items-center justify-center rounded-full px-5 py-3 text-center text-sm transition ${
+    className={`relative flex w-full cursor-pointer items-center justify-center rounded-full px-5 py-3 text-center text-sm transition ${
       company.status === status
         ? "bg-[#2F80ED] font-semibold text-white"
         : "text-gray-700 hover:bg-[#eff6ff] hover:text-[#2F80ED]"
@@ -2272,7 +2272,7 @@ useEffect(() => {
         e.stopPropagation();
         handleMockAction("call", company.id);
       }}
-      className="rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+      className="cursor-pointer rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
     >
       Call
     </button>
@@ -2282,7 +2282,7 @@ useEffect(() => {
         e.stopPropagation();
         handleMockAction("email", company.id);
       }}
-      className="rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+      className="cursor-pointer rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
     >
       Email
     </button>
@@ -2315,7 +2315,7 @@ useEffect(() => {
           right: window.innerWidth - rect.right,
         });
       }}
-      className={`rounded-xl px-3 py-2 text-lg leading-none transition ${
+      className={`cursor-pointer rounded-xl px-3 py-2 text-lg leading-none transition ${
         openMenuId === company.id
           ? "bg-gradient-to-r from-teal-400 to-blue-500 text-white shadow-sm"
           : "text-gray-600 hover:bg-gray-100"
@@ -2341,7 +2341,7 @@ useEffect(() => {
     >
       <button
         onClick={() => handleViewDetails(company.id)}
-        className="flex w-full items-center gap-3 border-b border-white/10 px-4 py-3 text-left text-[15px] transition hover:bg-gradient-to-r hover:from-[#0d3b42] hover:to-[#0c2f57]"
+        className="flex w-full cursor-pointer items-center gap-3 border-b border-white/10 px-4 py-3 text-left text-[15px] transition hover:bg-gradient-to-r hover:from-[#0d3b42] hover:to-[#0c2f57]"
       >
         <span className="flex h-5 w-5 shrink-0 items-center justify-center text-white/95">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
@@ -2354,7 +2354,7 @@ useEffect(() => {
 
       <button
         onClick={() => handleMockAction("call", company.id)}
-        className="flex w-full items-center gap-3 border-b border-white/10 px-4 py-3 text-left text-[15px] transition hover:bg-gradient-to-r hover:from-[#0d3b42] hover:to-[#0c2f57]"
+        className="flex w-full cursor-pointer items-center gap-3 border-b border-white/10 px-4 py-3 text-left text-[15px] transition hover:bg-gradient-to-r hover:from-[#0d3b42] hover:to-[#0c2f57]"
       >
         <span className="flex h-5 w-5 shrink-0 items-center justify-center text-white/95">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
@@ -2366,7 +2366,7 @@ useEffect(() => {
 
       <button
         onClick={() => handleMockAction("email", company.id)}
-        className="flex w-full items-center gap-3 border-b border-white/10 px-4 py-3 text-left text-[15px] transition hover:bg-gradient-to-r hover:from-[#0d3b42] hover:to-[#0c2f57]"
+        className="flex w-full cursor-pointer items-center gap-3 border-b border-white/10 px-4 py-3 text-left text-[15px] transition hover:bg-gradient-to-r hover:from-[#0d3b42] hover:to-[#0c2f57]"
       >
         <span className="flex h-5 w-5 shrink-0 items-center justify-center text-white/95">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
@@ -2413,7 +2413,7 @@ useEffect(() => {
             setEditModalOpen(true);
           }, 50);
         }}
-        className="flex w-full items-center gap-3 border-b border-white/10 px-4 py-3 text-left text-[15px] transition hover:bg-gradient-to-r hover:from-[#0d3b42] hover:to-[#0c2f57]"
+        className="flex w-full cursor-pointer items-center gap-3 border-b border-white/10 px-4 py-3 text-left text-[15px] transition hover:bg-gradient-to-r hover:from-[#0d3b42] hover:to-[#0c2f57]"
       >
         <span className="flex h-5 w-5 shrink-0 items-center justify-center text-white/95">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
@@ -2426,7 +2426,7 @@ useEffect(() => {
 
       <button
         onClick={() => deleteCompany(company.id)}
-        className="flex w-full items-center gap-3 px-4 py-3 text-left text-[15px] text-red-400 transition hover:bg-gradient-to-r hover:from-[#0d3b42] hover:to-[#0c2f57]"
+        className="flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left text-[15px] text-red-400 transition hover:bg-gradient-to-r hover:from-[#0d3b42] hover:to-[#0c2f57]"
       >
         <span className="flex h-5 w-5 shrink-0 items-center justify-center text-red-400">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
@@ -2466,7 +2466,7 @@ useEffect(() => {
   <div className="flex items-center gap-2">
     <button
       onClick={() => changeDay(-1)}
-      className="rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+      className="cursor-pointer rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
     >
       ← Prev
     </button>
@@ -2480,7 +2480,7 @@ useEffect(() => {
 
     <button
       onClick={() => changeDay(1)}
-      className="rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+      className="cursor-pointer rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
     >
       Next →
     </button>
@@ -2550,7 +2550,7 @@ const width = 100 / overlapping.length;
     e.stopPropagation();
     removeEvent(event.id);
   }}
-  className="absolute right-2 top-1 text-[10px] text-white/70"
+  className="absolute right-2 top-1 cursor-pointer text-[10px] text-white/70"
 >
   ✕
 </button>
@@ -2584,7 +2584,7 @@ const width = 100 / overlapping.length;
                     />
                     <button
                       onClick={addEvent}
-                      className="rounded-xl bg-gradient-to-r from-teal-400 to-blue-500 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:opacity-90"
+                      className="cursor-pointer rounded-xl bg-gradient-to-r from-teal-400 to-blue-500 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:opacity-90"
                     >
                       Add
                     </button>
@@ -2662,7 +2662,7 @@ const width = 100 / overlapping.length;
     <button
       key={tab}
       onClick={() => setActiveTab(tab)}
-      className={`rounded-2xl px-3 py-3 text-sm font-semibold transition ${
+      className={`cursor-pointer rounded-2xl px-3 py-3 text-sm font-semibold transition ${
         activeTab === tab
           ? "bg-black text-white shadow-sm"
           : "bg-white text-gray-600 hover:bg-gray-100 hover:text-[#111827]"
@@ -2676,14 +2676,14 @@ const width = 100 / overlapping.length;
               <div className="grid grid-cols-2 gap-3">
       <button
     onClick={() => handleMockAction("call", selectedCompany.id)}
-    className="rounded-xl bg-[#2F80ED] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#256fd0]"
+    className="cursor-pointer rounded-xl bg-[#2F80ED] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#256fd0]"
   >
     Log Call
   </button>
 
   <button
     onClick={() => handleMockAction("email", selectedCompany.id)}
-    className="rounded-xl bg-[#2F80ED] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#256fd0]"
+    className="cursor-pointer rounded-xl bg-[#2F80ED] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#256fd0]"
   >
     Log Email
   </button>
@@ -2943,7 +2943,7 @@ const width = 100 / overlapping.length;
       />
       <button
         onClick={saveCompanyNote}
-        className="mt-3 rounded-xl border border-[#4ade80] bg-[#4ade80] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:opacity-90"
+        className="mt-3 cursor-pointer rounded-xl border border-[#4ade80] bg-[#4ade80] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:opacity-90"
       >
         Save Note
       </button>
@@ -3016,7 +3016,7 @@ const width = 100 / overlapping.length;
                     setMockAction(null);
                     setMockActionCompany(null);
                   }}
-                  className="text-2xl text-gray-400"
+                  className="cursor-pointer text-2xl text-gray-400"
                 >
                   ×
                 </button>
@@ -3044,7 +3044,7 @@ const width = 100 / overlapping.length;
                       setMockAction(null);
                       setMockActionCompany(null);
                     }}
-                    className="rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-700"
+                    className="cursor-pointer rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-700"
                   >
                     Cancel
                   </button>
@@ -3129,7 +3129,7 @@ setCompanyList((prev) =>
   setMockActionCompany(null);
   setMockNote("");
 }}
-  className="rounded-xl bg-gradient-to-r from-teal-400 to-blue-500 px-4 py-3 text-sm font-semibold text-white"
+  className="cursor-pointer rounded-xl bg-gradient-to-r from-teal-400 to-blue-500 px-4 py-3 text-sm font-semibold text-white"
 >
   Save
 </button>
@@ -3163,7 +3163,7 @@ setCompanyList((prev) =>
             setEditModalOpen(false);
             setIsEditingCompany(false);
           }}
-          className="rounded-xl px-3 py-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+          className="cursor-pointer rounded-xl px-3 py-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
         >
           ✕
         </button>
@@ -3329,14 +3329,14 @@ setCompanyList((prev) =>
             setEditModalOpen(false);
             setIsEditingCompany(false);
           }}
-          className="rounded-2xl border border-gray-300 bg-white px-5 py-3 font-medium text-gray-700 hover:bg-gray-50"
+          className="cursor-pointer rounded-2xl border border-gray-300 bg-white px-5 py-3 font-medium text-gray-700 hover:bg-gray-50"
         >
           Cancel
         </button>
 
         <button
           onClick={saveEditedCompany}
-          className="rounded-2xl bg-gradient-to-r from-teal-400 to-blue-500 px-5 py-3 font-semibold text-white shadow-sm"
+          className="cursor-pointer rounded-2xl bg-gradient-to-r from-teal-400 to-blue-500 px-5 py-3 font-semibold text-white shadow-sm"
         >
           Save Changes
         </button>
@@ -3358,7 +3358,7 @@ setCompanyList((prev) =>
         <h3 className="text-2xl font-semibold">Add Company</h3>
         <button
           onClick={() => setAddModalOpen(false)}
-          className="rounded-xl px-3 py-2 text-sm text-gray-500 hover:bg-gray-100"
+          className="cursor-pointer rounded-xl px-3 py-2 text-sm text-gray-500 hover:bg-gray-100"
         >
           ✕
         </button>
@@ -3527,14 +3527,14 @@ setCompanyList((prev) =>
       <div className="mt-6 flex justify-end gap-3">
         <button
           onClick={() => setAddModalOpen(false)}
-          className="rounded-2xl border border-gray-300 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          className="cursor-pointer rounded-2xl border border-gray-300 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
         >
           Cancel
         </button>
 
         <button
           onClick={saveNewCompany}
-          className="rounded-2xl border border-[#4ade80] bg-[#4ade80] px-4 py-3 text-sm font-medium text-white transition hover:opacity-90"
+          className="cursor-pointer rounded-2xl border border-[#4ade80] bg-[#4ade80] px-4 py-3 text-sm font-medium text-white transition hover:opacity-90"
         >
           Save Company
         </button>
@@ -3564,7 +3564,7 @@ setCompanyList((prev) =>
             setEditEventModalOpen(false);
             setEditingEventId(null);
           }}
-          className="rounded-xl px-3 py-2 text-sm text-gray-500 hover:bg-gray-100"
+          className="cursor-pointer rounded-xl px-3 py-2 text-sm text-gray-500 hover:bg-gray-100"
         >
           ✕
         </button>
@@ -3636,7 +3636,7 @@ setCompanyList((prev) =>
           {editingEventId && (
             <button
               onClick={deleteEditedEvent}
-              className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-600 hover:bg-red-100"
+              className="cursor-pointer rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-600 hover:bg-red-100"
             >
               Delete
             </button>
@@ -3649,14 +3649,14 @@ setCompanyList((prev) =>
               setEditEventModalOpen(false);
               setEditingEventId(null);
             }}
-            className="rounded-2xl border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            className="cursor-pointer rounded-2xl border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
             Cancel
           </button>
 
           <button
             onClick={saveEditedEvent}
-            className="rounded-2xl border border-[#4ade80] bg-[#4ade80] px-4 py-3 text-sm font-medium text-white transition hover:opacity-90"
+            className="cursor-pointer rounded-2xl border border-[#4ade80] bg-[#4ade80] px-4 py-3 text-sm font-medium text-white transition hover:opacity-90"
           >
             {editingEventId ? "Save Changes" : "Create Event"}
           </button>
@@ -3689,7 +3689,7 @@ setCompanyList((prev) =>
 
         <button
           onClick={() => setImportPreviewOpen(false)}
-          className="rounded-xl px-3 py-2 text-sm text-gray-500 hover:bg-gray-100"
+          className="cursor-pointer rounded-xl px-3 py-2 text-sm text-gray-500 hover:bg-gray-100"
         >
           ✕
         </button>
@@ -3731,14 +3731,14 @@ setCompanyList((prev) =>
             setPendingImportRows([]);
             setPendingImportFileName("");
           }}
-          className="rounded-2xl border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          className="cursor-pointer rounded-2xl border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
         >
           Cancel
         </button>
 
         <button
           onClick={handleImportSheet}
-          className="rounded-2xl border border-[#4ade80] bg-[#4ade80] px-4 py-3 text-sm font-medium text-white transition hover:opacity-90"
+          className="cursor-pointer rounded-2xl border border-[#4ade80] bg-[#4ade80] px-4 py-3 text-sm font-medium text-white transition hover:opacity-90"
         >
           Verify Import
         </button>

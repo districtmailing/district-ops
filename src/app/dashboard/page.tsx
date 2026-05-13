@@ -168,7 +168,7 @@ export default function DashboardPage() {
           <div className="relative">
             <button
               onClick={() => setRangeOpen((prev) => !prev)}
-              className="flex min-w-[220px] items-center justify-between rounded-2xl border border-gray-300 bg-white px-5 py-3 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+              className="flex min-w-[220px] cursor-pointer items-center justify-between rounded-2xl border border-gray-300 bg-white px-5 py-3 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
             >
               <span>{selectedRange}</span>
               <svg
@@ -200,7 +200,7 @@ export default function DashboardPage() {
                         setSelectedRange(option);
                         setRangeOpen(false);
                       }}
-                      className={`flex w-full items-center gap-3 px-4 py-3 text-left text-sm transition ${
+                      className={`flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left text-sm transition ${
                         isActive
                           ? "bg-teal-400 text-[#111827] font-semibold"
                           : "text-gray-700 hover:bg-gray-50"

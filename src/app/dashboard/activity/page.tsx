@@ -349,7 +349,7 @@ const shiftRange = (direction: -1 | 1) => {
                   <select
                     value={selectedRep}
                     onChange={(e) => setSelectedRep(e.target.value)}
-                    className="h-12 rounded-2xl border border-gray-300 bg-white px-4 text-sm text-gray-700 outline-none"
+                    className="h-12 cursor-pointer rounded-2xl border border-gray-300 bg-white px-4 text-sm text-gray-700 outline-none"
                   >
                     <option>All Reps</option>
                     {REP_OPTIONS.map((rep) => (
@@ -362,7 +362,7 @@ const shiftRange = (direction: -1 | 1) => {
                   <select
                     value={selectedShow}
                     onChange={(e) => setSelectedShow(e.target.value)}
-                    className="h-12 rounded-2xl border border-gray-300 bg-white px-4 text-sm text-gray-700 outline-none"
+                    className="h-12 cursor-pointer rounded-2xl border border-gray-300 bg-white px-4 text-sm text-gray-700 outline-none"
                   >
                     <option>All Shows</option>
                     {availableTradeShows.map((show) => (
@@ -383,7 +383,7 @@ const shiftRange = (direction: -1 | 1) => {
       <div className="flex flex-wrap items-center gap-3">
         <button
           onClick={() => shiftRange(-1)}
-          className="rounded-[18px] border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+          className="cursor-pointer rounded-[18px] border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
         >
           ← Prev
         </button>
@@ -394,7 +394,7 @@ const shiftRange = (direction: -1 | 1) => {
 
         <button
           onClick={() => shiftRange(1)}
-          className="rounded-[18px] border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+          className="cursor-pointer rounded-[18px] border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
         >
           Next →
         </button>
@@ -412,7 +412,7 @@ const shiftRange = (direction: -1 | 1) => {
         <button
           key={range}
           onClick={() => setRangeFilter(range)}
-          className={`rounded-[18px] px-6 py-3 text-base font-medium capitalize transition ${
+          className={`cursor-pointer rounded-[18px] px-6 py-3 text-base font-medium capitalize transition ${
             rangeFilter === range
               ? "bg-white text-[#111827] shadow-sm"
               : "text-gray-500 hover:text-[#111827]"
@@ -562,7 +562,7 @@ const shiftRange = (direction: -1 | 1) => {
 
                             <a
                               href="/dashboard/pipeline"
-                              className="rounded-full border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-100"
+                              className="cursor-pointer rounded-full border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-100"
                             >
                               Open in Pipeline
                             </a>

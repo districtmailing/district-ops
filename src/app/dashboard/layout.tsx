@@ -341,6 +341,12 @@ const filteredItems = useMemo(() => {
                   collapsed={collapsed}
                   icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>}
                 />
+                <NavItem
+                  href="/dashboard/sales/results"
+                  label="Results"
+                  collapsed={collapsed}
+                  icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3v18h18" /><path d="m7 15 4-4 3 3 5-7" /><path d="M19 7h-4" /><path d="M19 7v4" /></svg>}
+                />
               </div>
             </div>
 

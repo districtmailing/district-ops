@@ -3,6 +3,14 @@
 import Link from "next/link";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
+import {
+  createPurchaseOrder,
+  createPurchaseOrderLineItem,
+  listPurchaseOrderLineItemsForSheet,
+  listPurchaseOrders,
+  parseNumber,
+  PurchaseOrder,
+} from "@/lib/purchaseOrders";
 
 type AmazonMatch = {
   asin: string;
@@ -317,8 +325,16 @@ const renameTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [quickNeedCase, setQuickNeedCase] = useState("");
   const [quickNeedEach, setQuickNeedEach] = useState("");
   const [quickNeedDisc, setQuickNeedDisc] = useState("0");
+  const [poCaseSize, setPoCaseSize] = useState("");
+  const [poAsinAmount, setPoAsinAmount] = useState("");
+  const [poUnits, setPoUnits] = useState("");
+  const [poCases, setPoCases] = useState("");
+  const [poLeftOver, setPoLeftOver] = useState("");
   const [createPoModalOpen, setCreatePoModalOpen] = useState(false);
   const [newPoName, setNewPoName] = useState("");
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [addedPoRowIds, setAddedPoRowIds] = useState<Set<string>>(new Set());
+  const [savingPoItem, setSavingPoItem] = useState(false);
   const [listPage, setListPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [jumpPageInput, setJumpPageInput] = useState("");
@@ -375,6 +391,12 @@ const renameTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     setQuickNeedCase(cost);
     setQuickNeedEach(asinCostRaw);
     setQuickNeedDisc("0");
+    const caseSize = normalizeNumericString(itemDetailRow.casePack || "1");
+    const asinAmount = itemDetailRow.amazonMatch ? "1" : "0";
+    setPoCaseSize(caseSize);
+    setPoAsinAmount(asinAmount);
+    setPoUnits(asinAmount);
+    updateCasesFromUnits(asinAmount, caseSize);
   }, [itemDetailsModalRowId, itemDetailRow]);
 
   const quickSellEach = useMemo(() => {
@@ -384,19 +406,23 @@ const renameTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const quickWantEachDerived = useMemo(() => {
     if (!itemDetailRow) return qaParseMoney(quickWantEach);
+    const eachN = qaParseMoney(quickWantEach);
+    if (eachN !== null) return eachN;
     const caseN = qaParseMoney(quickWantCase);
-    const cp = parseFloat(String(itemDetailRow.casePack || "1").replace(/,/g, ""));
+    const cp = parseFloat(String(poCaseSize || itemDetailRow.casePack || "1").replace(/,/g, ""));
     if (caseN !== null && Number.isFinite(cp) && cp > 0) return caseN / cp;
-    return qaParseMoney(quickWantEach);
-  }, [itemDetailRow, quickWantCase, quickWantEach]);
+    return eachN;
+  }, [itemDetailRow, quickWantCase, quickWantEach, poCaseSize]);
 
   const quickNeedEachDerived = useMemo(() => {
     if (!itemDetailRow) return qaParseMoney(quickNeedEach);
+    const eachN = qaParseMoney(quickNeedEach);
+    if (eachN !== null) return eachN;
     const caseN = qaParseMoney(quickNeedCase);
-    const cp = parseFloat(String(itemDetailRow.casePack || "1").replace(/,/g, ""));
+    const cp = parseFloat(String(poCaseSize || itemDetailRow.casePack || "1").replace(/,/g, ""));
     if (caseN !== null && Number.isFinite(cp) && cp > 0) return caseN / cp;
-    return qaParseMoney(quickNeedEach);
-  }, [itemDetailRow, quickNeedCase, quickNeedEach]);
+    return eachN;
+  }, [itemDetailRow, quickNeedCase, quickNeedEach, poCaseSize]);
 
   const quickWantMetrics = useMemo(() => {
     const disc = qaParseMoney(quickWantDisc) || 0;
@@ -412,10 +438,195 @@ const renameTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     if (itemDetailsModalRowId) setItemModalSelectedPo("");
   }, [itemDetailsModalRowId]);
 
+  function normalizeNumericString(value: unknown) {
+    const cleaned = String(value ?? "").replace(/[^\d.]/g, "");
+    if (!cleaned) return "";
+    const parsed = Number(cleaned);
+    return Number.isFinite(parsed) ? String(parsed) : "";
+  }
+
+  function calculateQuantityParts(unitsValue: unknown, caseSizeValue: unknown) {
+    const units = Number(normalizeNumericString(unitsValue));
+    const caseSize = Number(normalizeNumericString(caseSizeValue));
+    if (!Number.isFinite(units) || !Number.isFinite(caseSize) || caseSize <= 0) {
+      return { cases: "", leftOver: "" };
+    }
+    return {
+      cases: String(Math.floor(units / caseSize)),
+      leftOver: String(units % caseSize),
+    };
+  }
+
+  function updateCasesFromUnits(unitsValue: unknown, caseSizeValue = poCaseSize) {
+    const parts = calculateQuantityParts(unitsValue, caseSizeValue);
+    setPoCases(parts.cases);
+    setPoLeftOver(parts.leftOver);
+  }
+
+  function handleCaseSizeChange(value: string) {
+    const next = normalizeNumericString(value);
+    setPoCaseSize(next);
+    updateCasesFromUnits(poUnits, next);
+  }
+
+  function handleAsinAmountChange(value: string) {
+    const next = normalizeNumericString(value);
+    setPoAsinAmount(next);
+    setPoUnits(next);
+    updateCasesFromUnits(next);
+  }
+
+  function handleUnitsChange(value: string) {
+    const next = normalizeNumericString(value);
+    setPoUnits(next);
+    updateCasesFromUnits(next);
+  }
+
+  function handleCasesChange(value: string) {
+    const next = normalizeNumericString(value);
+    const caseSize = Number(normalizeNumericString(poCaseSize));
+    setPoCases(next);
+    if (!Number.isFinite(caseSize) || caseSize <= 0) {
+      setPoUnits("");
+      setPoLeftOver("");
+      return;
+    }
+    const nextUnits = String((Number(next) || 0) * caseSize);
+    setPoUnits(nextUnits);
+    setPoLeftOver("0");
+  }
+
+  const loadPurchaseOrders = async () => {
+    try {
+      const [orders, lineItems] = await Promise.all([
+        listPurchaseOrders({ supplierSheetId: sheetId }),
+        listPurchaseOrderLineItemsForSheet(sheetId),
+      ]);
+      setPurchaseOrders(orders);
+      setAddedPoRowIds(new Set(lineItems.map((item) => item.supplierRowId).filter(Boolean)));
+    } catch (error) {
+      console.error("Error loading purchase orders:", {
+        message: error && typeof error === "object" && "message" in error ? error.message : undefined,
+        code: error && typeof error === "object" && "code" in error ? error.code : undefined,
+        details: error && typeof error === "object" && "details" in error ? error.details : undefined,
+        hint: error && typeof error === "object" && "hint" in error ? error.hint : undefined,
+        error,
+      });
+      setPurchaseOrders([]);
+      setAddedPoRowIds(new Set());
+      setToast("Could not load connected POs from Supabase.");
+      window.setTimeout(() => setToast(""), 3200);
+    }
+  };
+
+  useEffect(() => {
+    loadPurchaseOrders();
+  }, []);
+
   useEffect(() => {
     if (!createPoModalOpen || !sheet) return;
     setNewPoName(buildDefaultPoName(sheet.supplier, sheet.sheetName));
   }, [createPoModalOpen, sheet]);
+
+  const handleAddItemToPo = async () => {
+    if (!sheet || !itemDetailRow) return;
+
+    if (!itemModalSelectedPo) {
+      setToast("Select a PO before adding this item.");
+      window.setTimeout(() => setToast(""), 2200);
+      return;
+    }
+
+    setSavingPoItem(true);
+
+    try {
+      const eachCost = quickWantEachDerived ?? parseNumber(itemDetailRow.cost);
+      const caseCost = parseNumber(quickWantCase);
+      const needEachCost = quickNeedEachDerived ?? parseNumber(itemDetailRow.amazonMatch?.asinCost || "");
+      const needCaseCost = parseNumber(quickNeedCase);
+
+      const savedItem = await createPurchaseOrderLineItem({
+        poId: itemModalSelectedPo,
+        supplierSheetId: sheet.id,
+        supplierRowId: itemDetailRow.id,
+        asin: itemDetailRow.amazonMatch?.asin || "",
+        upc: itemDetailRow.upc,
+        itemNumber: itemDetailRow.supplierSku,
+        supplierTitle: itemDetailRow.title,
+        supplierDescription: itemDetailRow.title,
+        supplierImage: "",
+        amazonTitle: itemDetailRow.amazonMatch?.title || "",
+        amazonImage: itemDetailRow.amazonMatch?.image || "",
+        buyBox: parseNumber(itemDetailRow.amazonMatch?.buyBox || ""),
+        packSize: itemDetailRow.amazonMatch?.packSize || itemDetailRow.casePack || "",
+        caseSize: poCaseSize,
+        asinAmount: parseNumber(poAsinAmount),
+        units: parseNumber(poUnits),
+        cases: parseNumber(poCases),
+        leftOver: parseNumber(poLeftOver),
+        eachCost,
+        caseCost,
+        wantCaseCost: caseCost,
+        wantEachCost: eachCost,
+        wantDiscount: parseNumber(quickWantDisc),
+        needCaseCost,
+        needEachCost,
+        needDiscount: parseNumber(quickNeedDisc),
+        profit: quickWantMetrics.p,
+        roi: quickWantMetrics.roi,
+        pm: quickWantMetrics.pm,
+        needProfit: quickNeedMetrics.p,
+        needRoi: quickNeedMetrics.roi,
+        needPm: quickNeedMetrics.pm,
+      });
+
+      setAddedPoRowIds((prev) => new Set(prev).add(savedItem.supplierRowId));
+      setToast("Item added to PO");
+      setItemDetailsModalRowId(null);
+      window.setTimeout(() => setToast(""), 2200);
+    } catch (error) {
+      console.error("Error adding item to PO:", error);
+      setToast("Could not add item to PO.");
+      window.setTimeout(() => setToast(""), 2600);
+    } finally {
+      setSavingPoItem(false);
+    }
+  };
+
+  const handleCreatePo = async () => {
+    if (!sheet) return;
+    const name = newPoName.trim();
+
+    if (!name) {
+      setToast("Add a PO name to continue.");
+      window.setTimeout(() => setToast(""), 2200);
+      return;
+    }
+
+    try {
+      const createdPo = await createPurchaseOrder({
+        name,
+        supplier: sheet.supplier,
+        buyer: sheet.buyer,
+        supplierSheetId: sheet.id,
+      });
+      setPurchaseOrders((prev) => [createdPo, ...prev]);
+      setItemModalSelectedPo(createdPo.id);
+      setCreatePoModalOpen(false);
+      setToast(`PO “${createdPo.name}” created.`);
+      window.setTimeout(() => setToast(""), 2400);
+    } catch (error) {
+      console.error("Error creating PO:", {
+        message: error && typeof error === "object" && "message" in error ? error.message : undefined,
+        code: error && typeof error === "object" && "code" in error ? error.code : undefined,
+        details: error && typeof error === "object" && "details" in error ? error.details : undefined,
+        hint: error && typeof error === "object" && "hint" in error ? error.hint : undefined,
+        error,
+      });
+      setToast("Could not create PO.");
+      window.setTimeout(() => setToast(""), 2600);
+    }
+  };
 
   useEffect(() => {
     if (!sheet) return;
@@ -746,8 +957,19 @@ const updateAmazonMatchField = (
           <p className="invisible mb-1 select-none text-xs font-medium leading-tight text-gray-500" aria-hidden="true">
             Connected POs
           </p>
-          <select className="h-10 w-full min-w-0 rounded-xl border border-gray-300 bg-white px-3 text-sm">
-            <option>Connected POs</option>
+          <select
+            className="h-10 w-full min-w-0 rounded-xl border border-gray-300 bg-white px-3 text-sm"
+            value=""
+            onChange={(event) => {
+              if (event.target.value) window.location.href = `/dashboard/purchase-order/${event.target.value}`;
+            }}
+          >
+            <option value="">{purchaseOrders.length ? "Connected POs" : "No POs"}</option>
+            {purchaseOrders.map((po) => (
+              <option key={po.id} value={po.id}>
+                {po.name}
+              </option>
+            ))}
           </select>
         </div>
 
@@ -1704,11 +1926,11 @@ const updateAmazonMatchField = (
   onClick={() => setItemDetailsModalRowId(row.id)}
   className="flex h-9 min-h-0 shrink-0 flex-nowrap cursor-pointer items-center justify-center gap-1 overflow-hidden whitespace-nowrap rounded-2xl px-2 py-1 text-[12px] font-semibold leading-none text-white shadow-sm"
   style={{
-    backgroundColor: "#43586a",
-    boxShadow: "inset 0 0 0 9999px #43586a",
+    backgroundColor: addedPoRowIds.has(row.id) ? "#15803d" : "#43586a",
+    boxShadow: `inset 0 0 0 9999px ${addedPoRowIds.has(row.id) ? "#15803d" : "#43586a"}`,
   }}
 >
-  <span className="shrink-0">ADD TO PO</span>
+  <span className="shrink-0">{addedPoRowIds.has(row.id) ? "ON PO" : "ADD TO PO"}</span>
   <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 shrink-0">
     <path
       d="M9 6l6 6-6 6"
@@ -2051,40 +2273,31 @@ const updateAmazonMatchField = (
                   </h3>
                   <button
                     type="button"
-                    onClick={() => {
-                      setToast("ADD NOW (preview — connect to PO when ready).");
-                      window.setTimeout(() => setToast(""), 2200);
-                    }}
+                    onClick={handleAddItemToPo}
+                    disabled={savingPoItem}
                     className="shrink-0 rounded-md bg-[#1d4ed8] px-3 py-1.5 text-[11px] font-semibold text-white shadow-sm hover:bg-[#1e40af]"
                   >
-                    ADD NOW
+                    {savingPoItem ? "ADDING..." : "ADD NOW"}
                   </button>
                 </div>
                 <div className="flex flex-wrap items-end gap-1.5">
                   {(
                     [
-                      ["Case Size", itemDetailRow.casePack || ""],
-                      ["ASIN Amount", itemDetailRow.amazonMatch ? "1" : "0"],
-                      ["Units", itemDetailRow.quantity || ""],
-                      [
-                        "Cases",
-                        (() => {
-                          const q = parseFloat(String(itemDetailRow.quantity).replace(/,/g, ""));
-                          const cp = parseFloat(String(itemDetailRow.casePack).replace(/,/g, ""));
-                          if (!Number.isFinite(q) || !Number.isFinite(cp) || cp <= 0) return "";
-                          return String(Math.floor(q / cp));
-                        })(),
-                      ],
-                      ["Left Over", "0"],
+                      ["Case Size", poCaseSize, handleCaseSizeChange],
+                      ["ASIN Amount", poAsinAmount, handleAsinAmountChange],
+                      ["Units", poUnits, handleUnitsChange],
+                      ["Cases", poCases, handleCasesChange],
+                      ["Left Over", poLeftOver, setPoLeftOver],
                     ] as const
-                  ).map(([label, val]) => (
+                  ).map(([label, val, onChange]) => (
                     <div key={label} className="min-w-[4.25rem] flex-1 basis-[4.25rem]">
                       <label className="mb-0.5 block text-[9px] font-semibold uppercase tracking-wide text-gray-500">
                         {label}
                       </label>
                       <input
-                        readOnly
+                        inputMode="decimal"
                         value={val}
+                        onChange={(event) => onChange(event.target.value)}
                         className="h-8 w-full rounded border border-gray-300 bg-white px-1.5 text-[11px] font-medium tabular-nums text-[#111827] outline-none"
                       />
                     </div>
@@ -2104,8 +2317,11 @@ const updateAmazonMatchField = (
                         className="h-8 min-w-0 flex-1 rounded border border-gray-300 bg-white px-1.5 text-[11px] font-medium text-[#111827] outline-none focus:border-[#2563eb]"
                       >
                         <option value="">Select…</option>
-                        <option value="po-2044">PO-2044</option>
-                        <option value="po-2099">PO-2099</option>
+                        {purchaseOrders.map((po) => (
+                          <option key={po.id} value={po.id}>
+                            {po.name}
+                          </option>
+                        ))}
                       </select>
                       <button
                         type="button"
@@ -2243,17 +2459,7 @@ const updateAmazonMatchField = (
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  const name = newPoName.trim();
-                  if (!name) {
-                    setToast("Add a PO name to continue.");
-                    window.setTimeout(() => setToast(""), 2200);
-                    return;
-                  }
-                  setCreatePoModalOpen(false);
-                  setToast(`PO “${name}” will be created (preview only).`);
-                  window.setTimeout(() => setToast(""), 2400);
-                }}
+                onClick={handleCreatePo}
                 className="rounded-xl bg-[#22c55e] px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#16a34a]"
               >
                 Create

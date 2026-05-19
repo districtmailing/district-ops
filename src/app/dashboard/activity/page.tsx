@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { needsFollowUp as companyNeedsFollowUp } from "@/lib/followUp";
 import { supabase } from "@/lib/supabase";
 
 type Company = {
@@ -15,6 +16,7 @@ type Company = {
   website: string;
   address: string;
   latestNote: string;
+  lastContactedAt?: string;
 };
 
 type ActivityItem = {
@@ -72,6 +74,7 @@ function mapCompanyRow(row: any): Company {
     website: row.website || "",
     address: row.address || "",
     latestNote: row.latest_note || "",
+    lastContactedAt: row.last_contacted_at || "",
   };
 }
 
@@ -174,20 +177,15 @@ const [rangeAnchorDate, setRangeAnchorDate] = useState(() => new Date());
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [activities, filteredCompanyIds, periodRange]);
 
-  const touchedCompanyIds = useMemo(() => {
-    return new Set(filteredActivities.map((item) => item.companyId));
-  }, [filteredActivities]);
-
   const totalSuppliers = filteredCompanies.length;
   const totalCalls = filteredActivities.filter((item) => item.type === "Call").length;
   const totalEmails = filteredActivities.filter((item) => item.type === "Email").length;
 
   const actionItems = useMemo(() => {
     return filteredCompanies
-      .filter((company) => company.status === "WIP")
-      .filter((company) => !touchedCompanyIds.has(company.id))
+      .filter((company) => companyNeedsFollowUp(company))
       .sort((a, b) => a.company.localeCompare(b.company));
-  }, [filteredCompanies, touchedCompanyIds]);
+  }, [filteredCompanies]);
 
   const needsFollowUp = actionItems.length;
   const totalYesCompanies = filteredCompanies.filter((company) => company.status === "YES").length;
@@ -270,6 +268,7 @@ const shiftRange = (direction: -1 | 1) => {
           website,
           address,
           latest_note,
+          last_contacted_at,
           sales_reps(name),
           trade_shows(name),
           statuses(name)
@@ -467,7 +466,7 @@ const shiftRange = (direction: -1 | 1) => {
               <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
                 <p className="text-sm text-gray-500">Needs Follow-Up</p>
                 <p className="mt-3 text-3xl font-bold">{needsFollowUp}</p>
-                <p className="mt-2 text-sm text-amber-600">WIP companies with no touch in period</p>
+                <p className="mt-2 text-sm text-amber-600">Older than 3 business days</p>
               </div>
             </div>
 
@@ -538,7 +537,7 @@ const shiftRange = (direction: -1 | 1) => {
                     </div>
                   ) : actionItems.length === 0 ? (
                     <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
-                      No WIP companies need follow-up for this filter.
+                      No companies need follow-up for this filter.
                     </div>
                   ) : (
                     <div className="space-y-4">

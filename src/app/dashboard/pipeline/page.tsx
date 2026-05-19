@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import * as XLSX from "xlsx";
+import { needsFollowUp } from "@/lib/followUp";
 import { supabase } from "@/lib/supabase";
 type Company = {
   id: string;
@@ -23,6 +24,32 @@ lastContactedAt?: string;
   emails: number;
 };
 
+type ImportRow = {
+  company: string;
+  show: string;
+  rep: string;
+  contact: string;
+  status: string;
+  email: string;
+  phone: string;
+  website: string;
+  address: string;
+  latestNote: string;
+  importedNotes: string;
+};
+
+type ImportFeedback = {
+  type: "success" | "error";
+  title: string;
+  details?: string[];
+};
+
+type PendingDuplicateImport = {
+  row: ImportRow;
+  existingCompany: Company;
+  rowIndex: number;
+};
+
 type CalendarEvent = {
   id: string;
   title: string;
@@ -33,10 +60,13 @@ type CalendarEvent = {
 
 
 function statusClass(status: string) {
-  if (status === "None") return "bg-amber-100 text-amber-700";
-  if (status === "YES") return "bg-teal-100 text-teal-700";
-  if (status === "Company call done") return "bg-green-100 text-green-700";
-  if (status === "WIP") return "bg-gray-200 text-gray-700";
+  const normalizedStatus = normalizeStatusValue(status);
+
+  if (normalizedStatus === "NONE") return "bg-amber-100 text-amber-700";
+  if (normalizedStatus === "YES") return "bg-teal-100 text-teal-700";
+  if (normalizedStatus === "NO") return "bg-rose-100 text-rose-700";
+  if (normalizedStatus === "Company Call Done") return "bg-green-100 text-green-700";
+  if (normalizedStatus === "WIP") return "bg-gray-200 text-gray-700";
   return "bg-gray-100 text-gray-700";
 }
 
@@ -125,12 +155,8 @@ function ActivityIcon({ type }: { type: string }) {
     </svg>
   );
 }
-function shouldShowWarning(
-  company: Company,
-  companyNotes: Record<string, { date: string; time: string; type: string; text: string }[]>
-) {
-  const notes = companyNotes[company.id] || [];
-  return company.status !== "YES" && notes.length === 0;
+function shouldShowWarning(company: Company) {
+  return needsFollowUp(company);
 }
 function mapCompanyRow(row: any): Company {
   const tradeShowName = Array.isArray(row.trade_shows)
@@ -151,7 +177,7 @@ function mapCompanyRow(row: any): Company {
     show: tradeShowName || "",
     rep: salesRepName || "",
     contact: row.contact_name || "",
-    status: statusName || "",
+    status: normalizeStatusValue(statusName || ""),
     email: row.email || "",
     phone: row.phone || "",
     website: row.website || "",
@@ -164,10 +190,6 @@ lastContactedAt: row.last_contacted_at || "",
     emails: 0,
   };
 }
-function truncateText(text: string, maxLength: number) {
-  if (!text) return "";
-  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
-}
 function formatWebsiteUrl(url: string) {
   if (!url) return "";
   return url.startsWith("http://") || url.startsWith("https://")
@@ -176,7 +198,35 @@ function formatWebsiteUrl(url: string) {
 }
 
 
-const STATUS_OPTIONS = ["WIP", "Company call done", "YES", "None"];
+const STATUS_OPTIONS = ["NONE", "WIP", "Company Call Done", "YES", "NO"];
+const IMPORT_STATUS_OPTIONS = STATUS_OPTIONS;
+
+function normalizeCompanyStatus(value: unknown) {
+  if (value === null || value === undefined) return "NONE";
+
+  const normalizedStatus = String(value).trim().toLowerCase();
+
+  if (!normalizedStatus) return "NONE";
+
+  const statusMap: Record<string, string> = {
+    none: "NONE",
+    wip: "WIP",
+    "company call done": "Company Call Done",
+    "company call": "Company Call Done",
+    yes: "YES",
+    y: "YES",
+    true: "YES",
+    "1": "YES",
+    no: "NO",
+    n: "NO",
+    false: "NO",
+    "0": "NO",
+  };
+
+  return statusMap[normalizedStatus] || "NONE";
+}
+
+const normalizeStatusValue = normalizeCompanyStatus;
 
 export default function PipelinePage() {
   const [selectedShow, setSelectedShow] = useState("TRADESHOW");
@@ -193,12 +243,14 @@ const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [activeTab, setActiveTab] = useState<"Overview" | "Notes" | "Activity" | "Documents">("Overview");
   const [tradeShowOptions, setTradeShowOptions] = useState<string[]>([]);
 const [repOptions, setRepOptions] = useState<string[]>([]);
+const [teamMemberRepOptions, setTeamMemberRepOptions] = useState<string[]>([]);
 const [currentTeamId, setCurrentTeamId] = useState<string | null>(null);
 const [manageTradeShowsOpen, setManageTradeShowsOpen] = useState(false);
 const [editingTradeShowName, setEditingTradeShowName] = useState("");
 const [editingTradeShowValue, setEditingTradeShowValue] = useState("");
 const [newTradeShowName, setNewTradeShowName] = useState("");
 const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+const [currentUserName, setCurrentUserName] = useState("");
 
   const [focusItems, setFocusItems] = useState<string[]>([]);
   const [isEditingFocus, setIsEditingFocus] = useState(false);
@@ -244,7 +296,7 @@ const [editedCompany, setEditedCompany] = useState({
   phone: "",
   website: "",
   address: "",
-  status: "None",
+  status: "NONE",
 });
 const [addModalOpen, setAddModalOpen] = useState(false);
 const [newCompany, setNewCompany] = useState({
@@ -257,22 +309,15 @@ const [newCompany, setNewCompany] = useState({
   website: "",
   address: "",
   latestNote: "",
-  status: "",
+  status: "NONE",
 });
 const [importPreviewOpen, setImportPreviewOpen] = useState(false);
-const [pendingImportRows, setPendingImportRows] = useState<
-  {
-    company: string;
-    show: string;
-    contact: string;
-    status: string;
-    email: string;
-    phone: string;
-    website: string;
-    latestNote: string;
-  }[]
->([]);
+const [pendingImportRows, setPendingImportRows] = useState<ImportRow[]>([]);
 const [pendingImportFileName, setPendingImportFileName] = useState("");
+const [pendingDuplicateImport, setPendingDuplicateImport] =
+  useState<PendingDuplicateImport | null>(null);
+const [importFeedback, setImportFeedback] = useState<ImportFeedback | null>(null);
+const [bulkImportSalesRep, setBulkImportSalesRep] = useState("");
 const [customTradeShow, setCustomTradeShow] = useState("");
 const [customSalesRep, setCustomSalesRep] = useState("");
 const [companyList, setCompanyList] = useState<Company[]>([]);
@@ -282,6 +327,7 @@ const [companyNotes, setCompanyNotes] = useState<
 const [showCompanyList, setShowCompanyList] = useState(true);
 const [currentViewMode, setCurrentViewMode] = useState<"cards" | "graph">("cards");
 const importFileRef = useRef<HTMLInputElement | null>(null);
+const importFeedbackTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const filteredCompanies = useMemo(() => {
   return companyList.filter((c) => {
@@ -300,7 +346,9 @@ const repMatch =
   selectedRep === "SALES REP" || selectedRep === "All Reps" || c.rep === selectedRep;
 
 const statusMatch =
-  selectedStatus === "STATUS" || selectedStatus === "All Statuses" || c.status === selectedStatus;
+  selectedStatus === "STATUS" ||
+  selectedStatus === "All Statuses" ||
+  normalizeStatusValue(c.status) === selectedStatus;
 
     return showMatch && repMatch && statusMatch;
   });
@@ -332,14 +380,17 @@ const selectedCompanyActivity =
     : [];
 
   const totalSuppliers = filteredCompanies.length;
-  const totalWip = filteredCompanies.filter((c) => c.status === "WIP").length;
-  const totalCallDone = filteredCompanies.filter((c) => c.status === "Company call done").length;
-  const totalYes = filteredCompanies.filter((c) => c.status === "YES").length;
+  const totalWip = filteredCompanies.filter((c) => normalizeStatusValue(c.status) === "WIP").length;
+  const totalCallDone = filteredCompanies.filter(
+    (c) => normalizeStatusValue(c.status) === "Company Call Done"
+  ).length;
+  const totalYes = filteredCompanies.filter((c) => normalizeStatusValue(c.status) === "YES").length;
+  const totalFollowUp = filteredCompanies.filter((company) => needsFollowUp(company)).length;
 const currentViewGraphData = [
   { label: "Suppliers", value: totalSuppliers },
   { label: "WIP", value: totalWip },
   { label: "Call Done", value: totalCallDone },
-  { label: "Follow Up", value: totalYes },
+  { label: "Follow Up", value: totalFollowUp },
 ];
 
 const currentViewGraphMax = Math.max(
@@ -680,7 +731,7 @@ const saveEditedCompany = async () => {
 
   const repName = editedCompany.rep.trim();
 const showName = editedCompany.show.trim();
-const statusName = editedCompany.status.trim();
+const statusName = normalizeStatusValue(editedCompany.status);
 
 const { data: repData } = await supabase
   .from("sales_reps")
@@ -694,11 +745,7 @@ const { data: showData } = await supabase
   .eq("name", showName)
   .maybeSingle();
 
-const { data: statusData } = await supabase
-  .from("statuses")
-  .select("id, name")
-  .eq("name", statusName)
-  .maybeSingle();
+const statusData = await resolveStatusData(statusName);
 
   const { data, error } = await supabase
     .from("companies")
@@ -753,14 +800,10 @@ const updateCompanyStatus = async (companyId: string, nextStatus: string) => {
 
   setIsUpdatingStatus(true);
 
-  const { data: statusData, error: statusLookupError } = await supabase
-    .from("statuses")
-    .select("id, name")
-    .eq("name", nextStatus)
-    .maybeSingle();
+  const statusData = await resolveStatusData(nextStatus);
 
-  if (statusLookupError || !statusData) {
-    console.error("Error finding status:", statusLookupError);
+  if (!statusData) {
+    console.warn(`Could not resolve status "${nextStatus}". Status was not updated.`);
     setIsUpdatingStatus(false);
     return;
   }
@@ -842,6 +885,336 @@ const findExistingCompany = (
   });
 };
 
+const normalizeImportHeader = (value: string) =>
+  value.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+
+const getImportCellValue = (
+  row: Record<string, unknown>,
+  aliases: string[]
+) => {
+  const normalizedAliases = aliases.map(normalizeImportHeader);
+  const match = Object.entries(row).find(([key]) =>
+    normalizedAliases.includes(normalizeImportHeader(key))
+  );
+
+  if (!match) return "";
+
+  return String(match[1] ?? "").trim();
+};
+
+const getImportedNotes = (row: Record<string, unknown>) => {
+  const noteParts: string[] = [];
+
+  Object.entries(row).forEach(([key, value]) => {
+    const normalizedKey = normalizeImportHeader(key);
+    const text = String(value ?? "").trim();
+
+    if (!text) return;
+
+    const isNoteField =
+      normalizedKey.includes("note") ||
+      normalizedKey.includes("comment") ||
+      normalizedKey.includes("remark");
+
+    if (!isNoteField) return;
+
+    const label = key.trim() || "Imported Notes";
+    noteParts.push(`[${label}] ${text}`);
+  });
+
+  return noteParts.join("\n\n");
+};
+
+const showImportFeedback = (feedback: ImportFeedback) => {
+  setImportFeedback(feedback);
+
+  if (importFeedbackTimeout.current) {
+    clearTimeout(importFeedbackTimeout.current);
+  }
+
+  importFeedbackTimeout.current = setTimeout(() => {
+    setImportFeedback(null);
+  }, feedback.type === "success" ? 4500 : 6500);
+};
+
+const resolveStatusData = async (status: string) => {
+  const statusName = normalizeCompanyStatus(status);
+
+  const { data: statusRows, error: statusRowsError } = await supabase
+    .from("statuses")
+    .select("id, name");
+
+  if (!statusRowsError) {
+    const matchingStatus = (statusRows || []).find(
+      (item: { id: string; name: string }) =>
+        normalizeCompanyStatus(item.name) === statusName
+    );
+
+    if (matchingStatus) return matchingStatus;
+  }
+
+  const { data: existingStatus, error: lookupError } = await supabase
+    .from("statuses")
+    .select("id, name")
+    .ilike("name", statusName)
+    .limit(1)
+    .maybeSingle();
+
+  if (lookupError) {
+    console.warn(`Status lookup failed for "${statusName}".`, lookupError);
+    if (statusName !== "NO" && statusName !== "NONE") return resolveStatusData("NONE");
+    return null;
+  }
+
+  if (existingStatus) return existingStatus;
+
+  const insertPayloads =
+    currentTeamId
+      ? [{ name: statusName, team_id: currentTeamId }, { name: statusName }]
+      : [{ name: statusName }];
+
+  for (const payload of insertPayloads) {
+    const { data: insertedStatus, error: insertError } = await supabase
+      .from("statuses")
+      .insert([payload])
+      .select("id, name")
+      .single();
+
+    if (!insertError && insertedStatus) return insertedStatus;
+
+    console.warn(`Status "${statusName}" was not found and could not be created with this payload.`, insertError);
+  }
+
+  const { data: retriedStatusRows } = await supabase
+    .from("statuses")
+    .select("id, name");
+  const retriedStatus = (retriedStatusRows || []).find(
+    (item: { id: string; name: string }) =>
+      normalizeCompanyStatus(item.name) === statusName
+  );
+
+  if (retriedStatus) return retriedStatus;
+
+  if (statusName !== "NO" && statusName !== "NONE") {
+    console.warn(`Status "${statusName}" could not be resolved. Falling back to NONE.`);
+    return resolveStatusData("NONE");
+  }
+
+  console.warn(`Status "${statusName}" could not be resolved.`);
+  return null;
+};
+
+const resolveImportLookups = async (row: ImportRow, mode: "create" | "update") => {
+  const fallbackRep =
+    selectedRep !== "All Reps" && selectedRep !== "SALES REP"
+      ? selectedRep
+      : currentUserName;
+  const repName = row.rep || (mode === "create" ? fallbackRep : "");
+  const showName = row.show ? getImportShowValue(row.show) : "";
+  const statusName = normalizeStatusValue(row.status);
+
+  let repData: { id: string; name: string } | null = null;
+
+  if (repName && repName !== "Unassigned") {
+    const { data: existingRep } = await supabase
+      .from("sales_reps")
+      .select("id, name")
+      .eq("name", repName)
+      .maybeSingle();
+
+    repData = existingRep;
+
+    if (!repData && currentTeamId) {
+      const { data: insertedRep, error: insertRepError } = await supabase
+        .from("sales_reps")
+        .insert([{ name: repName, team_id: currentTeamId }])
+        .select("id, name")
+        .single();
+
+      if (insertRepError) {
+        console.error("[Pipeline Import] save failure", insertRepError);
+        throw new Error("save failed while saving imported sales rep");
+      }
+
+      repData = insertedRep;
+      setRepOptions((prev) => (prev.includes(repName) ? prev : [...prev, repName].sort()));
+    }
+  }
+
+  const { data: showData } = showName
+    ? await supabase
+        .from("trade_shows")
+        .select("id, name")
+        .eq("name", showName)
+        .maybeSingle()
+    : { data: null };
+
+  const statusData = statusName ? await resolveStatusData(statusName) : null;
+
+  return { repData, showData, statusData };
+};
+
+const saveImportedCompanyNote = async (companyId: string, row: ImportRow) => {
+  const importedNotes = row.importedNotes.trim();
+
+  if (!importedNotes) return false;
+
+  const importedAt = new Date().toLocaleString("en-US");
+  const noteText = `Imported sheet notes (${importedAt}):\n\n${importedNotes}`;
+
+  const { data, error } = await supabase
+    .from("company_notes")
+    .insert([
+      {
+        company_id: companyId,
+        note_type: "Note",
+        note_text: noteText,
+      },
+    ])
+    .select()
+    .single();
+
+  if (error) {
+    console.error("[Pipeline Import] save failure", error);
+    throw new Error("save failed while saving imported notes");
+  }
+
+  const { date, time } = formatActivityDateTime(data.created_at);
+
+  setCompanyNotes((prev) => ({
+    ...prev,
+    [companyId]: [
+      {
+        date,
+        time,
+        type: "Note",
+        text: data.note_text,
+      },
+      ...(prev[companyId] || []),
+    ],
+  }));
+
+  return true;
+};
+
+const saveImportedCompany = async (
+  row: ImportRow,
+  action: "create" | "update",
+  existingCompany?: Company
+) => {
+  const { repData, showData, statusData } = await resolveImportLookups(row, action);
+  const normalizedStatus = normalizeCompanyStatus(row.status);
+
+  if (!statusData && normalizedStatus === "NO") {
+    throw new Error("save failed because the NO status could not be resolved");
+  }
+
+  const latestNote = row.latestNote || row.importedNotes;
+
+  if (action === "update" && existingCompany) {
+    const updatePayload: Record<string, string | null> = {
+      company_name: row.company,
+    };
+
+    if (row.contact) updatePayload.contact_name = row.contact;
+    if (row.email) updatePayload.email = row.email;
+    if (row.phone) updatePayload.phone = row.phone;
+    if (row.website) updatePayload.website = row.website;
+    if (row.address) updatePayload.address = row.address;
+    if (latestNote) updatePayload.latest_note = latestNote;
+    if (repData?.id) updatePayload.sales_rep_id = repData.id;
+    if (showData?.id) updatePayload.trade_show_id = showData.id;
+    if (statusData?.id) updatePayload.status_id = statusData.id;
+
+    const { data, error } = await supabase
+      .from("companies")
+      .update(updatePayload)
+      .eq("id", existingCompany.id)
+      .select(`
+        id,
+        company_name,
+        contact_name,
+        email,
+        phone,
+        website,
+        address,
+        latest_note,
+        created_at,
+last_contacted_at,
+        sales_reps:sales_rep_id(name),
+trade_shows:trade_show_id(name),
+statuses:status_id(name)
+      `)
+      .single();
+
+    if (error) {
+      console.error("[Pipeline Import] save failure", error);
+      throw new Error("save failed while updating existing company");
+    }
+
+    const updatedCompany = mapCompanyRow(data);
+    const notesImported = await saveImportedCompanyNote(updatedCompany.id, row);
+
+    setCompanyList((prev) =>
+      prev.map((companyItem) =>
+        companyItem.id === updatedCompany.id ? updatedCompany : companyItem
+      )
+    );
+
+    return { company: updatedCompany, notesImported, updated: true };
+  }
+
+  if (!currentTeamId) {
+    throw new Error("missing team for imported company save");
+  }
+
+  const { data, error } = await supabase
+    .from("companies")
+    .insert([
+      {
+        team_id: currentTeamId,
+        company_name: row.company,
+        contact_name: row.contact || null,
+        email: row.email || null,
+        phone: row.phone || null,
+        website: row.website || null,
+        address: row.address || null,
+        latest_note: latestNote || null,
+        sales_rep_id: repData?.id ?? null,
+        trade_show_id: showData?.id ?? null,
+        status_id: statusData?.id ?? null,
+      },
+    ])
+    .select(`
+      id,
+      company_name,
+      contact_name,
+      email,
+      phone,
+      website,
+      address,
+      latest_note,
+      created_at,
+last_contacted_at,
+      sales_reps:sales_rep_id(name),
+trade_shows:trade_show_id(name),
+statuses:status_id(name)
+    `)
+    .single();
+
+  if (error) {
+    console.error("[Pipeline Import] save failure", error);
+    throw new Error("save failed while creating imported company");
+  }
+
+  const formattedCompany = mapCompanyRow(data);
+  const notesImported = await saveImportedCompanyNote(formattedCompany.id, row);
+
+  setCompanyList((prev) => [formattedCompany, ...prev]);
+
+  return { company: formattedCompany, notesImported, updated: false };
+};
+
 const deleteCompany = async (companyId: string) => {
   const companyToDelete = companyList.find((c) => c.id === companyId);
   if (!companyToDelete) return;
@@ -900,7 +1273,7 @@ setCompanyNameError("");
 
   const repName = newCompany.rep.trim();
 const showName = newCompany.show.trim();
-const statusName = newCompany.status.trim();
+const statusName = normalizeStatusValue(newCompany.status);
 
 let repData: { id: string; name: string } | null = null;
 
@@ -989,11 +1362,7 @@ if (newCompany.show === "__ADD_NEW__") {
   showData = existingShow;
 }
 
-  const { data: statusData } = await supabase
-    .from("statuses")
-    .select("id, name")
-    .eq("name", statusName)
-    .maybeSingle();
+  const statusData = await resolveStatusData(statusName);
 
   if (existingCompany) {
     const shouldOverride = window.confirm(
@@ -1066,7 +1435,7 @@ setActiveTab("Overview");
   website: "",
   address: "",
   latestNote: "",
-  status: "None",
+  status: "NONE",
 });
 setCustomTradeShow("");
 setCustomSalesRep("");
@@ -1138,7 +1507,7 @@ setActiveTab("Overview");
   website: "",
   address: "",
   latestNote: "",
-  status: "None",
+  status: "NONE",
 });
 setCustomTradeShow("");
 setCustomSalesRep("");
@@ -1146,258 +1515,294 @@ setCustomSalesRep("");
   setAddModalOpen(false);
 };
 const prepareImportSheet = async (file: File) => {
-  const data = await file.arrayBuffer();
-  const workbook = XLSX.read(data, { type: "array" });
-  const firstSheetName = workbook.SheetNames[0];
+  console.log("[Pipeline Import] file selected", file.name);
 
-  if (!firstSheetName) {
-    console.error("No sheet found in file.");
-    return;
-  }
+  try {
+    const data = await file.arrayBuffer();
+    const workbook = XLSX.read(data, { type: "array" });
+    const firstSheetName = workbook.SheetNames[0];
 
-  const worksheet = workbook.Sheets[firstSheetName];
-  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, {
-    defval: "",
-  });
+    if (!firstSheetName) {
+      console.error("[Pipeline Import] invalid sheet format: no sheet found");
+      showImportFeedback({
+        type: "error",
+        title: "Import failed",
+        details: ["Invalid sheet format: no sheet found."],
+      });
+      return;
+    }
 
-  if (rows.length === 0) {
-    console.error("Sheet is empty.");
-    return;
-  }
-
-  const parsedRows = rows
-    .map((row) => {
-      const company = String(
-        row.company ||
-          row.Company ||
-          row.COMPANY ||
-          ""
-      ).trim();
-
-      const show = String(
-        row.show ||
-          row.Show ||
-          row.SHOW ||
-          row.tradeshow ||
-          row.TradeShow ||
-          row.TRADESHOW ||
-          row["Trade Show"] ||
-          ""
-      ).trim();
-
-      const contact = String(
-        row.contact ||
-          row.Contact ||
-          row.CONTACT ||
-          row.name ||
-          row.Name ||
-          row.NAME ||
-          ""
-      ).trim();
-
-      const status = String(
-        row.status ||
-          row.Status ||
-          row.STATUS ||
-          "WIP"
-      ).trim() || "WIP";
-
-      const email = String(
-        row.email ||
-          row.Email ||
-          row.EMAIL ||
-          ""
-      ).trim();
-
-      const phone = String(
-        row.phone ||
-          row.Phone ||
-          row.PHONE ||
-          ""
-      ).trim();
-
-      const website = String(
-        row.website ||
-          row.Website ||
-          row.WEBSITE ||
-          ""
-      ).trim();
-
-      const latestNote = String(
-        row.notes ||
-          row.Notes ||
-          row.NOTES ||
-          row.note ||
-          row.Note ||
-          row.NOTE ||
-          ""
-      ).trim();
-
-      return {
-        company,
-        show,
-        contact,
-        status,
-        email,
-        phone,
-        website,
-        latestNote,
-      };
-    })
-    .filter((row) => row.company && row.show);
-
-  if (parsedRows.length === 0) {
-    console.error("No valid rows found in sheet.");
-    return;
-  }
-
-  setPendingImportRows(parsedRows);
-  setPendingImportFileName(file.name);
-  setImportPreviewOpen(true);
-};
-const handleImportSheet = async () => {
-  if (pendingImportRows.length === 0) return;
-
-  for (let i = 0; i < pendingImportRows.length; i++) {
-    const row = pendingImportRows[i];
-
-    const company = row.company;
-    const show = row.show;
-    const contact = row.contact;
-    const status = row.status || "WIP";
-    const email = row.email;
-    const phone = row.phone;
-    const website = row.website;
-    const latestNote = row.latestNote;
-
-    const existingCompany = findExistingCompany({
-      company,
-      email,
-      phone,
-      website,
+    const worksheet = workbook.Sheets[firstSheetName];
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, {
+      defval: "",
     });
 
-    const { data: repData } = await supabase
-      .from("sales_reps")
-      .select("id, name")
-      .eq("name", selectedRep === "All Reps" ? "William" : selectedRep)
-      .maybeSingle();
+    console.log("[Pipeline Import] parsed rows/data", rows);
 
-    const { data: showData } = await supabase
-      .from("trade_shows")
-      .select("id, name")
-      .eq("name", show)
-      .maybeSingle();
-
-    const { data: statusData } = await supabase
-      .from("statuses")
-      .select("id, name")
-      .eq("name", status)
-      .maybeSingle();
-
-    if (existingCompany) {
-      const shouldOverride = window.confirm(
-        `"${existingCompany.company}" already exists. Click OK to override it, or Cancel to skip this row.`
-      );
-
-      if (!shouldOverride) {
-        continue;
-      }
-
-      const { data: updatedData, error: updateError } = await supabase
-        .from("companies")
-        .update({
-          company_name: company,
-          contact_name: contact || null,
-          email: email || null,
-          phone: phone || null,
-          website: website || null,
-          address: existingCompany.address || null,
-          latest_note: latestNote || null,
-          sales_rep_id: repData?.id ?? null,
-          trade_show_id: showData?.id ?? null,
-          status_id: statusData?.id ?? null,
-        })
-        .eq("id", existingCompany.id)
-        .select(`
-          id,
-          company_name,
-          contact_name,
-          email,
-          phone,
-          website,
-          address,
-          latest_note,
-          created_at,
-last_contacted_at,
-          sales_reps:sales_rep_id(name),
-trade_shows:trade_show_id(name),
-statuses:status_id(name)
-        `)
-        .single();
-
-      if (updateError) {
-        console.error(`Error overriding row ${i + 1}:`, updateError);
-        continue;
-      }
-
-      const updatedCompany = mapCompanyRow(updatedData);
-
-      setCompanyList((prev) =>
-        prev.map((companyItem) =>
-          companyItem.id === updatedCompany.id ? updatedCompany : companyItem
-        )
-      );
-
-      continue;
+    if (rows.length === 0) {
+      console.error("[Pipeline Import] invalid sheet format: sheet is empty");
+      showImportFeedback({
+        type: "error",
+        title: "Import failed",
+        details: ["Invalid sheet format: sheet is empty."],
+      });
+      return;
     }
 
-    const { data: insertedData, error: insertError } = await supabase
-      .from("companies")
-      .insert([
-        {
-          company_name: company,
-          contact_name: contact || null,
-          email: email || null,
-          phone: phone || null,
-          website: website || null,
-          address: null,
-          latest_note: latestNote || null,
-          sales_rep_id: repData?.id ?? null,
-          trade_show_id: showData?.id ?? null,
-          status_id: statusData?.id ?? null,
-        },
-      ])
-      .select(`
-        id,
-        company_name,
-        contact_name,
-        email,
-        phone,
-        website,
-        address,
-        latest_note,
-        created_at,
-last_contacted_at,
-        sales_reps:sales_rep_id(name),
-trade_shows:trade_show_id(name),
-statuses:status_id(name)
-      `)
-      .single();
+    const parsedRows = rows
+      .map((row) => {
+        const importedNotes = getImportedNotes(row);
+        const latestNote = getImportCellValue(row, [
+          "latest note",
+          "latest_note",
+          "notes",
+          "note",
+          "company_notes",
+          "company notes",
+          "important_notes",
+          "important notes",
+          "day_notes",
+          "day notes",
+          "contact_notes",
+          "contact notes",
+          "sheet_notes",
+          "sheet notes",
+        ]);
+        const defaultRep = currentUserName || "Unassigned";
+        const companyName = getImportCellValue(row, [
+          "company",
+          "company name",
+          "company_name",
+          "supplier",
+          "supplier name",
+          "vendor",
+          "vendor name",
+        ]);
+        const rawStatus = getImportCellValue(row, ["status"]);
+        const normalizedStatus = normalizeCompanyStatus(rawStatus);
+        console.log("[Import Status]", companyName, { rawStatus, normalizedStatus });
+        const parsedRow: ImportRow = {
+          company: companyName,
+          show: getImportCellValue(row, [
+            "stage",
+            "pipeline stage",
+            "show",
+            "trade show",
+            "tradeshow",
+            "trade_show",
+          ]),
+          rep: getImportCellValue(row, [
+            "rep",
+            "sales rep",
+            "sales_rep",
+            "representative",
+          ]) || defaultRep,
+          contact: getImportCellValue(row, [
+            "contact",
+            "contact name",
+            "contact_name",
+            "name",
+          ]),
+          status: normalizedStatus,
+          email: getImportCellValue(row, ["email", "email address", "e-mail"]),
+          phone: getImportCellValue(row, ["phone", "phone number", "telephone"]),
+          website: getImportCellValue(row, ["website", "web site", "url"]),
+          address: getImportCellValue(row, ["address", "company address"]),
+          latestNote,
+          importedNotes,
+        };
 
-    if (insertError) {
-      console.error(`Error importing row ${i + 1}:`, insertError);
-      continue;
+        console.log("[Pipeline Import] company name detected", parsedRow.company);
+        console.log("[Pipeline Import] notes detected", parsedRow.importedNotes);
+
+        return parsedRow;
+      })
+      .filter((row) => row.company);
+
+    if (parsedRows.length === 0) {
+      console.error("[Pipeline Import] missing company name in imported rows");
+      showImportFeedback({
+        type: "error",
+        title: "Import failed",
+        details: ["Missing company name. At least one row must include a company name."],
+      });
+      return;
     }
 
-    const formattedCompany = mapCompanyRow(insertedData);
+    console.log("[Pipeline Import] parsed rows/data", parsedRows);
+    setPendingImportRows(parsedRows);
+    setPendingImportFileName(file.name);
+    setBulkImportSalesRep(parsedRows[0]?.rep || currentUserName || "Unassigned");
+    setImportPreviewOpen(true);
+  } catch (error) {
+    console.error("[Pipeline Import] invalid sheet format", error);
+    showImportFeedback({
+      type: "error",
+      title: "Import failed",
+      details: ["Invalid sheet format. Please upload a CSV or Excel file."],
+    });
+  }
+};
 
-    setCompanyList((prev) => [formattedCompany, ...prev]);
+const processImportRows = async (
+  startIndex = 0,
+  duplicateChoice?: "update" | "duplicate",
+  confirmedExistingCompany?: Company
+) => {
+  if (pendingImportRows.length === 0) {
+    showImportFeedback({
+      type: "error",
+      title: "Import failed",
+      details: ["Invalid sheet format: no parsed rows were found."],
+    });
+    return;
+  }
+
+  let updatedCount = 0;
+  let notesImported = false;
+  let lastCompanyName = "";
+
+  for (let i = startIndex; i < pendingImportRows.length; i++) {
+    const row = pendingImportRows[i];
+    const detectedExistingCompany = findExistingCompany({
+      company: row.company,
+      email: row.email,
+      phone: row.phone,
+      website: row.website,
+    });
+    const existingCompany =
+      i === startIndex && duplicateChoice === "update" && confirmedExistingCompany
+        ? confirmedExistingCompany
+        : detectedExistingCompany;
+    const choiceForRow = i === startIndex ? duplicateChoice : undefined;
+
+    if (existingCompany && !choiceForRow) {
+      console.log("[Pipeline Import] duplicate company detected", existingCompany.company);
+      setPendingDuplicateImport({ row, existingCompany, rowIndex: i });
+      showImportFeedback({
+        type: "error",
+        title: "Duplicate needs confirmation",
+        details: [`${existingCompany.company} already exists.`],
+      });
+      return;
+    }
+
+    try {
+      const result = await saveImportedCompany(
+        row,
+        existingCompany && choiceForRow === "update" ? "update" : "create",
+        existingCompany
+      );
+
+      console.log("[Pipeline Import] save success", result.company.company);
+
+      lastCompanyName = result.company.company;
+      notesImported = notesImported || result.notesImported;
+
+      if (result.updated) {
+        updatedCount += 1;
+      }
+    } catch (error) {
+      console.error("[Pipeline Import] save failure", error);
+      showImportFeedback({
+        type: "error",
+        title: "Import failed",
+        details: [
+          error instanceof Error ? error.message : "Save failed.",
+          row.company ? `Company: ${row.company}` : "Missing company name.",
+        ],
+      });
+      return;
+    }
   }
 
   setImportPreviewOpen(false);
   setPendingImportRows([]);
   setPendingImportFileName("");
+  setPendingDuplicateImport(null);
+  setBulkImportSalesRep("");
+
+  const details = [
+    lastCompanyName ? `Company: ${lastCompanyName}` : "",
+    notesImported ? "Notes imported" : "",
+    updatedCount > 0 ? "Company updated from imported sheet" : "",
+  ].filter(Boolean);
+
+  showImportFeedback({
+    type: "success",
+    title: "Sheet imported successfully",
+    details,
+  });
+};
+
+const handleImportSheet = async () => {
+  await processImportRows();
+};
+
+const getImportSalesRepOptions = () =>
+  Array.from(
+    new Set(
+      [
+        "Unassigned",
+        currentUserName,
+        ...repOptions,
+        ...teamMemberRepOptions,
+        ...pendingImportRows.map((row) => row.rep),
+      ].filter(Boolean)
+    )
+  );
+
+const updatePendingImportRow = (
+  index: number,
+  field: keyof ImportRow,
+  value: string
+) => {
+  setPendingImportRows((prev) =>
+    prev.map((row, rowIndex) =>
+      rowIndex === index ? { ...row, [field]: value } : row
+    )
+  );
+
+  setPendingDuplicateImport((prev) =>
+    prev && prev.rowIndex === index
+      ? { ...prev, row: { ...prev.row, [field]: value } }
+      : prev
+  );
+};
+
+const applySalesRepToAllImportRows = () => {
+  if (!bulkImportSalesRep) return;
+
+  setPendingImportRows((prev) =>
+    prev.map((row) => ({ ...row, rep: bulkImportSalesRep }))
+  );
+
+  setPendingDuplicateImport((prev) =>
+    prev ? { ...prev, row: { ...prev.row, rep: bulkImportSalesRep } } : prev
+  );
+};
+
+const importCellInputClass =
+  "w-full rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-900 outline-none focus:border-[#4ade80]";
+
+const getImportStatusValue = (status: string) => {
+  return normalizeCompanyStatus(status);
+};
+
+const getImportShowOptions = () =>
+  Array.from(
+    new Set(
+      [
+        ...tradeShowOptions,
+        ...companyList.map((company) => company.show),
+        ...pendingImportRows.map((row) => row.show),
+      ].filter(Boolean)
+    )
+  );
+
+const getImportShowValue = (show: string) => {
+  const showOptions = getImportShowOptions();
+  return showOptions.includes(show) ? show : showOptions[0] || "";
 };
 useEffect(() => {
   if (!openMenuId) return;
@@ -1530,11 +1935,22 @@ useEffect(() => {
 useEffect(() => {
   const loadCurrentTeam = async () => {
     const { data: userData } = await supabase.auth.getUser();
-    const userId = userData.user?.id;
+    const user = userData.user;
+    const userId = user?.id;
 
 if (!userId) return;
 
 setCurrentUserId(userId);
+
+const firstName = user?.user_metadata?.first_name || "";
+const lastName = user?.user_metadata?.last_name || "";
+const fullName =
+  `${firstName} ${lastName}`.trim() ||
+  user?.user_metadata?.full_name ||
+  user?.user_metadata?.name ||
+  user?.email?.split("@")[0] ||
+  "";
+setCurrentUserName(fullName);
 
     const { data, error } = await supabase
       .from("team_members")
@@ -1549,6 +1965,45 @@ setCurrentUserId(userId);
     }
 
     setCurrentTeamId(data?.team_id || null);
+
+    if (data?.team_id) {
+      const { data: membersData, error: membersError } = await supabase
+        .from("team_members")
+        .select(`
+          user_id,
+          profiles:user_id (
+            first_name,
+            last_name,
+            email
+          )
+        `)
+        .eq("team_id", data.team_id);
+
+      if (membersError) {
+        console.error("Error loading team members for import:", membersError);
+      } else {
+        const memberNames = (
+          (membersData || []) as {
+            profiles?:
+              | { first_name?: string; last_name?: string; email?: string }
+              | { first_name?: string; last_name?: string; email?: string }[];
+          }[]
+        )
+          .map((member) => {
+            const profile = Array.isArray(member.profiles)
+              ? member.profiles[0]
+              : member.profiles;
+            return (
+              `${profile?.first_name || ""} ${profile?.last_name || ""}`.trim() ||
+              profile?.email?.split("@")[0] ||
+              ""
+            );
+          })
+          .filter(Boolean);
+
+        setTeamMemberRepOptions(memberNames);
+      }
+    }
   };
 
   loadCurrentTeam();
@@ -1826,7 +2281,10 @@ useEffect(() => {
   Manage Trade Shows
 </button>
   <button
-    onClick={() => importFileRef.current?.click()}
+    onClick={() => {
+      console.log("[Pipeline Import] import button clicked");
+      importFileRef.current?.click();
+    }}
     className="cursor-pointer rounded-2xl border border-gray-300 bg-[#f8f8f8] px-4 py-3 text-sm font-medium text-gray-700 hover:bg-white"
   >
     Import Sheet
@@ -2013,10 +2471,11 @@ useEffect(() => {
                 >
                   <option value="STATUS">STATUS</option>
 <option value="All Statuses">All Statuses</option>
-<option value="WIP">WIP</option>
-<option value="Company call done">Company call done</option>
-<option value="YES">YES</option>
-<option value="None">None</option>
+{STATUS_OPTIONS.map((status) => (
+  <option key={status} value={status}>
+    {status}
+  </option>
+))}
                 </select>
               </div>
             </div>
@@ -2175,7 +2634,7 @@ useEffect(() => {
     <div className="flex items-start gap-2">
       <p className="max-w-[220px] font-semibold leading-5 break-words">{company.company}</p>
 
-      {shouldShowWarning(company, companyNotes) && (
+      {shouldShowWarning(company) && (
         <span className="mt-0.5 shrink-0 text-sm text-amber-500">⚠️</span>
       )}
     </div>
@@ -2208,7 +2667,7 @@ useEffect(() => {
     }}
     className={`inline-flex min-w-[148px] cursor-pointer items-center justify-center rounded-full px-4 py-2 text-center text-xs font-semibold leading-none shadow-sm transition duration-150 hover:scale-[1.02] hover:shadow ${statusClass(company.status)}`}
   >
-    {company.status}
+    {normalizeStatusValue(company.status)}
   </button>
 
   {statusMenuOpenId === company.id && statusMenuPosition && (
@@ -2227,12 +2686,12 @@ useEffect(() => {
     key={status}
     onClick={() => updateCompanyStatus(company.id, status)}
     className={`relative flex w-full cursor-pointer items-center justify-center rounded-full px-5 py-3 text-center text-sm transition ${
-      company.status === status
+      normalizeStatusValue(company.status) === status
         ? "bg-[#2F80ED] font-semibold text-white"
         : "text-gray-700 hover:bg-[#eff6ff] hover:text-[#2F80ED]"
     }`}
   >
-    {company.status === status && (
+    {normalizeStatusValue(company.status) === status && (
       <span className="absolute left-0 top-1/2 -translate-y-1/2 text-white">
         
       </span>
@@ -2404,7 +2863,7 @@ useEffect(() => {
             phone: company.phone || "",
             website: company.website || "",
             address: company.address || "",
-            status: company.status || "None",
+            status: normalizeStatusValue(company.status),
           });
           setOpenMenuId(null);
           setMenuPosition(null);
@@ -2799,7 +3258,7 @@ const width = 100 / overlapping.length;
       }}
       className="flex w-full items-center justify-between rounded-[16px] border border-[#1f2a32] bg-[#071214] px-5 py-4 text-[16px] text-white transition hover:border-[#2b3d47]"
     >
-      <span>{selectedCompany.status || "None"}</span>
+      <span>{normalizeStatusValue(selectedCompany.status)}</span>
 
       <svg
         viewBox="0 0 20 20"
@@ -2830,12 +3289,12 @@ const width = 100 / overlapping.length;
             key={status}
             onClick={() => updateCompanyStatus(selectedCompany.id, status)}
             className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-[15px] transition ${
-              selectedCompany.status === status
+              normalizeStatusValue(selectedCompany.status) === status
                 ? "bg-gradient-to-r from-blue-500 to-blue-600 text-white font-medium"
                 : "text-gray-300 hover:bg-[#0d1f26] hover:text-white"
             }`}
           >
-            {selectedCompany.status === status && (
+            {normalizeStatusValue(selectedCompany.status) === status && (
               <span className="text-white">✓</span>
             )}
             {status}
@@ -3001,7 +3460,7 @@ const width = 100 / overlapping.length;
   >
     <div
       onClick={(e) => e.stopPropagation()}
-      className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl"
+      className="w-full max-w-7xl rounded-3xl bg-white p-6 shadow-2xl"
     >
               <div className="flex items-start justify-between">
                 <div>
@@ -3256,7 +3715,7 @@ setCompanyList((prev) =>
             Status
           </label>
           <select
-            value={editedCompany.status}
+            value={normalizeStatusValue(editedCompany.status)}
             onChange={(e) =>
               setEditedCompany({ ...editedCompany, status: e.target.value })
             }
@@ -3497,14 +3956,15 @@ setCompanyList((prev) =>
         />
 
         <select
-          value={newCompany.status}
+          value={normalizeStatusValue(newCompany.status)}
           onChange={(e) => setNewCompany({ ...newCompany, status: e.target.value })}
           className="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
         >
-          <option>None</option>
-          <option>Company call done</option>
-          <option>YES</option>
-          <option>WIP</option>
+          {STATUS_OPTIONS.map((status) => (
+            <option key={status} value={status}>
+              {status}
+            </option>
+          ))}
         </select>
 
         <input
@@ -3670,14 +4130,34 @@ setCompanyList((prev) =>
     {logSuccessMessage}
   </div>
 )}
+{importFeedback && (
+  <div
+    className={`fixed bottom-6 right-6 z-[70] max-w-md rounded-2xl px-4 py-3 text-sm font-medium text-white shadow-2xl ${
+      importFeedback.type === "success" ? "bg-[#111827]" : "bg-red-600"
+    }`}
+  >
+    <p>{importFeedback.title}</p>
+    {importFeedback.details && importFeedback.details.length > 0 && (
+      <div className="mt-1 space-y-0.5 text-xs font-normal text-white/90">
+        {importFeedback.details.map((detail) => (
+          <p key={detail}>{detail}</p>
+        ))}
+      </div>
+    )}
+  </div>
+)}
 {importPreviewOpen && (
   <div
-    onClick={() => setImportPreviewOpen(false)}
+    onClick={() => {
+      setImportPreviewOpen(false);
+      setPendingDuplicateImport(null);
+      setBulkImportSalesRep("");
+    }}
     className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
   >
     <div
       onClick={(e) => e.stopPropagation()}
-      className="w-full max-w-5xl rounded-3xl bg-white p-6 shadow-2xl"
+      className="w-full max-w-7xl rounded-3xl bg-white p-6 shadow-2xl"
     >
       <div className="flex items-center justify-between gap-4">
         <div>
@@ -3688,36 +4168,145 @@ setCompanyList((prev) =>
         </div>
 
         <button
-          onClick={() => setImportPreviewOpen(false)}
+          onClick={() => {
+            setImportPreviewOpen(false);
+            setPendingDuplicateImport(null);
+            setBulkImportSalesRep("");
+          }}
           className="cursor-pointer rounded-xl px-3 py-2 text-sm text-gray-500 hover:bg-gray-100"
         >
           ✕
         </button>
       </div>
 
-      <div className="mt-5 max-h-[420px] overflow-auto rounded-2xl border border-gray-200">
-        <table className="min-w-full text-left">
+      <div className="mt-5 flex flex-wrap items-end gap-3 rounded-2xl bg-[#f7f7f8] px-4 py-3">
+        <label className="w-56">
+          <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+            Sales Rep
+          </span>
+          <select
+            value={bulkImportSalesRep}
+            onChange={(e) => setBulkImportSalesRep(e.target.value)}
+            className={`${importCellInputClass} mt-1`}
+          >
+            <option value="">Select rep...</option>
+            {getImportSalesRepOptions().map((rep) => (
+              <option key={rep} value={rep}>
+                {rep}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          onClick={applySalesRepToAllImportRows}
+          className="cursor-pointer rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50"
+        >
+          Apply to All
+        </button>
+      </div>
+
+      <div className="mt-4 max-h-[360px] overflow-y-auto overflow-x-hidden rounded-2xl border border-gray-200">
+        <table className="w-full table-fixed text-left">
           <thead className="sticky top-0 bg-[#f0f1f3] text-xs uppercase tracking-wide text-gray-500">
             <tr>
-              <th className="px-4 py-3 font-semibold">Company</th>
-              <th className="px-4 py-3 font-semibold">Show</th>
-              <th className="px-4 py-3 font-semibold">Contact</th>
-              <th className="px-4 py-3 font-semibold">Status</th>
-              <th className="px-4 py-3 font-semibold">Email</th>
-              <th className="px-4 py-3 font-semibold">Phone</th>
-              <th className="px-4 py-3 font-semibold">Website</th>
+              <th className="w-[12%] px-2 py-2 font-semibold">Company</th>
+              <th className="w-[9%] px-2 py-2 font-semibold">Show</th>
+              <th className="w-[11%] px-2 py-2 font-semibold">Sales Rep</th>
+              <th className="w-[10%] px-2 py-2 font-semibold">Contact</th>
+              <th className="w-[8%] px-2 py-2 font-semibold">Status</th>
+              <th className="w-[13%] px-2 py-2 font-semibold">Email</th>
+              <th className="w-[8%] px-2 py-2 font-semibold">Phone</th>
+              <th className="w-[12%] px-2 py-2 font-semibold">Website</th>
+              <th className="w-[17%] px-2 py-2 font-semibold">Notes</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200 bg-white">
             {pendingImportRows.map((row, index) => (
               <tr key={`${row.company}-${index}`} className="align-top">
-                <td className="px-4 py-3 text-sm text-gray-800">{row.company}</td>
-                <td className="px-4 py-3 text-sm text-gray-600">{row.show}</td>
-                <td className="px-4 py-3 text-sm text-gray-600">{row.contact || "—"}</td>
-                <td className="px-4 py-3 text-sm text-gray-600">{row.status || "WIP"}</td>
-                <td className="px-4 py-3 text-sm text-gray-600">{row.email || "—"}</td>
-                <td className="px-4 py-3 text-sm text-gray-600">{row.phone || "—"}</td>
-                <td className="px-4 py-3 text-sm text-gray-600">{row.website || "—"}</td>
+                <td className="px-2 py-2">
+                  <input
+                    value={row.company}
+                    onChange={(e) => updatePendingImportRow(index, "company", e.target.value)}
+                    className={importCellInputClass}
+                  />
+                </td>
+                <td className="px-2 py-2">
+                  <select
+                    value={getImportShowValue(row.show)}
+                    onChange={(e) => updatePendingImportRow(index, "show", e.target.value)}
+                    className={importCellInputClass}
+                  >
+                    {getImportShowOptions().map((show) => (
+                      <option key={show} value={show}>
+                        {show}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td className="px-2 py-2">
+                  <select
+                    value={row.rep || "Unassigned"}
+                    onChange={(e) => updatePendingImportRow(index, "rep", e.target.value)}
+                    className={importCellInputClass}
+                  >
+                    {getImportSalesRepOptions().map((rep) => (
+                      <option key={rep} value={rep}>
+                        {rep}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td className="px-2 py-2">
+                  <input
+                    value={row.contact}
+                    onChange={(e) => updatePendingImportRow(index, "contact", e.target.value)}
+                    className={importCellInputClass}
+                  />
+                </td>
+                <td className="px-2 py-2">
+                  <select
+                    value={getImportStatusValue(row.status)}
+                    onChange={(e) => updatePendingImportRow(index, "status", e.target.value)}
+                    className={importCellInputClass}
+                  >
+                    {IMPORT_STATUS_OPTIONS.map((status) => (
+                      <option key={status} value={status}>
+                        {status}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td className="px-2 py-2">
+                  <input
+                    value={row.email}
+                    onChange={(e) => updatePendingImportRow(index, "email", e.target.value)}
+                    className={importCellInputClass}
+                  />
+                </td>
+                <td className="px-2 py-2">
+                  <input
+                    value={row.phone}
+                    onChange={(e) => updatePendingImportRow(index, "phone", e.target.value)}
+                    className={importCellInputClass}
+                  />
+                </td>
+                <td className="px-2 py-2">
+                  <input
+                    value={row.website}
+                    onChange={(e) => updatePendingImportRow(index, "website", e.target.value)}
+                    className={importCellInputClass}
+                  />
+                </td>
+                <td className="px-2 py-2">
+                  <textarea
+                    value={row.importedNotes}
+                    onChange={(e) =>
+                      updatePendingImportRow(index, "importedNotes", e.target.value)
+                    }
+                    rows={2}
+                    className={`${importCellInputClass} min-h-[48px] resize-none`}
+                  />
+                </td>
               </tr>
             ))}
           </tbody>
@@ -3730,6 +4319,8 @@ setCompanyList((prev) =>
             setImportPreviewOpen(false);
             setPendingImportRows([]);
             setPendingImportFileName("");
+            setPendingDuplicateImport(null);
+            setBulkImportSalesRep("");
           }}
           className="cursor-pointer rounded-2xl border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
         >
@@ -3740,7 +4331,219 @@ setCompanyList((prev) =>
           onClick={handleImportSheet}
           className="cursor-pointer rounded-2xl border border-[#4ade80] bg-[#4ade80] px-4 py-3 text-sm font-medium text-white transition hover:opacity-90"
         >
-          Verify Import
+          Import
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+{pendingDuplicateImport && (
+  <div
+    onClick={() => setPendingDuplicateImport(null)}
+    className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 px-4"
+  >
+    <div
+      onClick={(e) => e.stopPropagation()}
+      className="w-full max-w-7xl rounded-3xl bg-white p-6 shadow-2xl"
+    >
+      <h3 className="text-2xl font-semibold text-gray-900">Company already exists</h3>
+      <p className="mt-2 text-sm text-gray-600">
+        This company already exists. Do you want to update it with the imported sheet data?
+      </p>
+      <div className="mt-4 rounded-2xl bg-[#f3f4f6] px-4 py-3 text-sm text-gray-700">
+        <p className="font-medium">{pendingDuplicateImport.existingCompany.company}</p>
+        <p className="mt-1 text-gray-500">
+          Imported as {pendingDuplicateImport.row.company}
+        </p>
+      </div>
+      <div className="mt-4 max-h-[220px] overflow-y-auto overflow-x-hidden rounded-2xl border border-gray-200">
+        <table className="w-full table-fixed text-left">
+          <thead className="sticky top-0 bg-[#f0f1f3] text-xs uppercase tracking-wide text-gray-500">
+            <tr>
+              <th className="w-[12%] px-2 py-2 font-semibold">Company</th>
+              <th className="w-[9%] px-2 py-2 font-semibold">Show</th>
+              <th className="w-[11%] px-2 py-2 font-semibold">Sales Rep</th>
+              <th className="w-[10%] px-2 py-2 font-semibold">Contact</th>
+              <th className="w-[8%] px-2 py-2 font-semibold">Status</th>
+              <th className="w-[13%] px-2 py-2 font-semibold">Email</th>
+              <th className="w-[8%] px-2 py-2 font-semibold">Phone</th>
+              <th className="w-[12%] px-2 py-2 font-semibold">Website</th>
+              <th className="w-[17%] px-2 py-2 font-semibold">Notes</th>
+            </tr>
+          </thead>
+          <tbody className="bg-white">
+            {[
+              pendingImportRows[pendingDuplicateImport.rowIndex] ||
+                pendingDuplicateImport.row,
+            ].map((row) => (
+              <tr key={`${row.company}-${pendingDuplicateImport.rowIndex}`} className="align-top">
+                <td className="px-2 py-2">
+                  <input
+                    value={row.company}
+                    onChange={(e) =>
+                      updatePendingImportRow(
+                        pendingDuplicateImport.rowIndex,
+                        "company",
+                        e.target.value
+                      )
+                    }
+                    className={importCellInputClass}
+                  />
+                </td>
+                <td className="px-2 py-2">
+                  <select
+                    value={getImportShowValue(row.show)}
+                    onChange={(e) =>
+                      updatePendingImportRow(
+                        pendingDuplicateImport.rowIndex,
+                        "show",
+                        e.target.value
+                      )
+                    }
+                    className={importCellInputClass}
+                  >
+                    {getImportShowOptions().map((show) => (
+                      <option key={show} value={show}>
+                        {show}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td className="px-2 py-2">
+                  <select
+                    value={row.rep || "Unassigned"}
+                    onChange={(e) =>
+                      updatePendingImportRow(
+                        pendingDuplicateImport.rowIndex,
+                        "rep",
+                        e.target.value
+                      )
+                    }
+                    className={importCellInputClass}
+                  >
+                    {getImportSalesRepOptions().map((rep) => (
+                      <option key={rep} value={rep}>
+                        {rep}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td className="px-2 py-2">
+                  <input
+                    value={row.contact}
+                    onChange={(e) =>
+                      updatePendingImportRow(
+                        pendingDuplicateImport.rowIndex,
+                        "contact",
+                        e.target.value
+                      )
+                    }
+                    className={importCellInputClass}
+                  />
+                </td>
+                <td className="px-2 py-2">
+                  <select
+                    value={getImportStatusValue(row.status)}
+                    onChange={(e) =>
+                      updatePendingImportRow(
+                        pendingDuplicateImport.rowIndex,
+                        "status",
+                        e.target.value
+                      )
+                    }
+                    className={importCellInputClass}
+                  >
+                    {IMPORT_STATUS_OPTIONS.map((status) => (
+                      <option key={status} value={status}>
+                        {status}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td className="px-2 py-2">
+                  <input
+                    value={row.email}
+                    onChange={(e) =>
+                      updatePendingImportRow(
+                        pendingDuplicateImport.rowIndex,
+                        "email",
+                        e.target.value
+                      )
+                    }
+                    className={importCellInputClass}
+                  />
+                </td>
+                <td className="px-2 py-2">
+                  <input
+                    value={row.phone}
+                    onChange={(e) =>
+                      updatePendingImportRow(
+                        pendingDuplicateImport.rowIndex,
+                        "phone",
+                        e.target.value
+                      )
+                    }
+                    className={importCellInputClass}
+                  />
+                </td>
+                <td className="px-2 py-2">
+                  <input
+                    value={row.website}
+                    onChange={(e) =>
+                      updatePendingImportRow(
+                        pendingDuplicateImport.rowIndex,
+                        "website",
+                        e.target.value
+                      )
+                    }
+                    className={importCellInputClass}
+                  />
+                </td>
+                <td className="px-2 py-2">
+                  <textarea
+                    value={row.importedNotes}
+                    onChange={(e) =>
+                      updatePendingImportRow(
+                        pendingDuplicateImport.rowIndex,
+                        "importedNotes",
+                        e.target.value
+                      )
+                    }
+                    rows={2}
+                    className={`${importCellInputClass} min-h-[48px] resize-none`}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
+        <button
+          onClick={() => setPendingDuplicateImport(null)}
+          className="cursor-pointer rounded-2xl border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={async () => {
+            const { rowIndex, existingCompany } = pendingDuplicateImport;
+            setPendingDuplicateImport(null);
+            await processImportRows(rowIndex, "update", existingCompany);
+          }}
+          className="cursor-pointer rounded-2xl border border-[#4ade80] bg-[#4ade80] px-4 py-3 text-sm font-medium text-white transition hover:opacity-90"
+        >
+          Update Existing
+        </button>
+        <button
+          onClick={async () => {
+            const { rowIndex } = pendingDuplicateImport;
+            setPendingDuplicateImport(null);
+            await processImportRows(rowIndex, "duplicate");
+          }}
+          className="cursor-pointer rounded-2xl border border-gray-300 bg-[#f8f8f8] px-4 py-3 text-sm font-medium text-gray-700 hover:bg-white"
+        >
+          Create Duplicate Anyway
         </button>
       </div>
     </div>

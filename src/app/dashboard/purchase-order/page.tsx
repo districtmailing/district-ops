@@ -1,6 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { listPurchaseOrders } from "@/lib/purchaseOrders";
 
 type PoRow = {
   id: string;
@@ -25,36 +27,6 @@ function parseSlashDate(s: string): number {
 }
 
 const STAGES = ["Sourcing", "Ordered", "Received", "Closed"] as const;
-const SUPPLIERS = ["Nick", "David", "Tony", "ResMed", "Country Life"] as const;
-const BUYERS = ["Dalin", "Arjun", "Maria"] as const;
-
-function buildMockRows(count: number): PoRow[] {
-  return Array.from({ length: count }, (_, i) => {
-    const profit = 5000 + i * 800 - (i % 7 === 0 ? 18000 : 0);
-    const totalCost = 12000 + i * 1200;
-    const pm = totalCost !== 0 ? (profit / totalCost) * 100 : 0;
-    const roi = totalCost !== 0 ? (profit / totalCost) * 100 : 0;
-    const mm = String((i % 12) + 1).padStart(2, "0");
-    const dd = String((i % 28) + 1).padStart(2, "0");
-    return {
-      id: String(i + 1),
-      name: `FK05072${60525 + i}`,
-      stage: STAGES[i % STAGES.length],
-      supplier: SUPPLIERS[i % SUPPLIERS.length],
-      sheets: (i % 4) + 1,
-      asinQty: 12 + (i % 40),
-      upcCount: 20 + (i % 55),
-      totalCost,
-      profit,
-      pm,
-      roi: roi * (i % 2 === 0 ? 0.85 : 1.1),
-      buyer: BUYERS[i % BUYERS.length],
-      createdOn: `${mm}/${dd}/2026`,
-    };
-  });
-}
-
-const ALL_MOCK_ROWS = buildMockRows(266);
 
 function StagePill({ stage }: { stage: string }) {
   return (
@@ -120,6 +92,8 @@ function PctPill({ value }: { value: number }) {
 }
 
 export default function PurchaseOrdersPage() {
+  const [poRows, setPoRows] = useState<PoRow[]>([]);
+  const [loadMessage, setLoadMessage] = useState("");
   const [searchType, setSearchType] = useState("Name");
   const [search, setSearch] = useState("");
   const [supplier, setSupplier] = useState("All");
@@ -146,8 +120,47 @@ export default function PurchaseOrdersPage() {
     return () => mo.disconnect();
   }, []);
 
+  useEffect(() => {
+    const loadPurchaseOrders = async () => {
+      try {
+        const savedOrders = await listPurchaseOrders();
+        setLoadMessage("");
+
+        setPoRows(
+          savedOrders.map((order) => ({
+            id: order.id,
+            name: order.name,
+            stage: order.stage || "Sourcing",
+            supplier: order.supplier || "—",
+            sheets: 0,
+            asinQty: 0,
+            upcCount: 0,
+            totalCost: 0,
+            profit: 0,
+            pm: 0,
+            roi: 0,
+            buyer: order.buyer || "—",
+            createdOn: new Date(order.createdAt || Date.now()).toLocaleDateString("en-US"),
+          }))
+        );
+      } catch (error) {
+        console.error("Error loading purchase orders:", {
+          message: error && typeof error === "object" && "message" in error ? error.message : undefined,
+          code: error && typeof error === "object" && "code" in error ? error.code : undefined,
+          details: error && typeof error === "object" && "details" in error ? error.details : undefined,
+          hint: error && typeof error === "object" && "hint" in error ? error.hint : undefined,
+          error,
+        });
+        setPoRows([]);
+        setLoadMessage("Could not load purchase orders from Supabase.");
+      }
+    };
+
+    loadPurchaseOrders();
+  }, []);
+
   const filteredRows = useMemo(() => {
-    let rows = [...ALL_MOCK_ROWS];
+    let rows = [...poRows];
     const q = search.trim().toLowerCase();
     if (q) {
       rows = rows.filter((r) => {
@@ -195,7 +208,11 @@ export default function PurchaseOrdersPage() {
       return sortAsc ? cmp : -cmp;
     });
     return rows;
-  }, [search, searchType, supplier, stage, sortBy, sortAsc, fromDate, toDate]);
+  }, [poRows, search, searchType, supplier, stage, sortBy, sortAsc, fromDate, toDate]);
+
+  const availableSuppliers = useMemo(() => {
+    return Array.from(new Set(poRows.map((row) => row.supplier).filter(Boolean))).sort();
+  }, [poRows]);
 
   const total = filteredRows.length;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -203,10 +220,6 @@ export default function PurchaseOrdersPage() {
   const start = total === 0 ? 0 : (safePage - 1) * pageSize + 1;
   const end = Math.min(safePage * pageSize, total);
   const pageRows = filteredRows.slice((safePage - 1) * pageSize, safePage * pageSize);
-
-  useEffect(() => {
-    setPage((p) => Math.min(p, totalPages));
-  }, [totalPages]);
 
   const pageNumbers = useMemo(() => {
     const max = totalPages;
@@ -280,7 +293,7 @@ export default function PurchaseOrdersPage() {
               className="h-8 w-full rounded-md border border-gray-300 bg-white px-1.5 text-[12px] outline-none focus:border-[#1e3a5f]"
             >
               <option>All</option>
-              {SUPPLIERS.map((s) => (
+              {availableSuppliers.map((s) => (
                 <option key={s} value={s}>
                   {s}
                 </option>
@@ -417,7 +430,7 @@ export default function PurchaseOrdersPage() {
                 {pageRows.length === 0 ? (
                   <tr>
                     <td colSpan={14} className="border-t border-gray-200 px-2 py-10 text-center text-[13px] text-gray-500">
-                      No purchase orders match your filters.
+                      {loadMessage || "No purchase orders found."}
                     </td>
                   </tr>
                 ) : (
@@ -427,8 +440,8 @@ export default function PurchaseOrdersPage() {
                         {(safePage - 1) * pageSize + idx + 1}
                       </td>
                       <td className="border-r border-gray-200 px-2 py-1.5">
-                        <button
-                          type="button"
+                        <Link
+                          href={`/dashboard/purchase-order/${row.id}`}
                           className="inline-flex max-w-[200px] items-center gap-1 truncate text-left font-semibold text-[#2563eb] hover:underline"
                         >
                           <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0 text-[#2563eb]" fill="none" stroke="currentColor" strokeWidth="2">
@@ -436,7 +449,7 @@ export default function PurchaseOrdersPage() {
                             <path d="M14 2v6h6" strokeLinecap="round" strokeLinejoin="round" />
                           </svg>
                           <span className="truncate">{row.name}</span>
-                        </button>
+                        </Link>
                       </td>
                       <td className="border-r border-gray-200 px-2 py-1.5">
                         <StagePill stage={row.stage} />
@@ -569,6 +582,11 @@ export default function PurchaseOrdersPage() {
           </label>
         </div>
       </footer>
+      {loadMessage && (
+        <div className="fixed bottom-16 right-4 z-[80] max-w-md rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-800 shadow-lg">
+          {loadMessage}
+        </div>
+      )}
     </section>
   );
 }

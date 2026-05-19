@@ -311,6 +311,7 @@ const [newCompany, setNewCompany] = useState({
   latestNote: "",
   status: "NONE",
 });
+const [importSheetModalOpen, setImportSheetModalOpen] = useState(false);
 const [importPreviewOpen, setImportPreviewOpen] = useState(false);
 const [pendingImportRows, setPendingImportRows] = useState<ImportRow[]>([]);
 const [pendingImportFileName, setPendingImportFileName] = useState("");
@@ -318,6 +319,7 @@ const [pendingDuplicateImport, setPendingDuplicateImport] =
   useState<PendingDuplicateImport | null>(null);
 const [importFeedback, setImportFeedback] = useState<ImportFeedback | null>(null);
 const [bulkImportSalesRep, setBulkImportSalesRep] = useState("");
+const [bulkImportShow, setBulkImportShow] = useState("");
 const [customTradeShow, setCustomTradeShow] = useState("");
 const [customSalesRep, setCustomSalesRep] = useState("");
 const [companyList, setCompanyList] = useState<Company[]>([]);
@@ -888,6 +890,32 @@ const findExistingCompany = (
 const normalizeImportHeader = (value: string) =>
   value.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
 
+const COMPANY_IMPORT_ALIASES = [
+  "company",
+  "company name",
+  "company_name",
+  "distributor",
+  "distributor name",
+  "brand",
+  "brand name",
+  "supplier",
+  "supplier name",
+  "vendor",
+  "vendor name",
+];
+
+const SHOW_IMPORT_ALIASES = [
+  "show",
+  "trade show",
+  "tradeshow",
+  "trade_show",
+];
+
+const sheetHasCompanyColumn = (row: Record<string, unknown>) =>
+  Object.keys(row).some((key) =>
+    COMPANY_IMPORT_ALIASES.map(normalizeImportHeader).includes(normalizeImportHeader(key))
+  );
+
 const getImportCellValue = (
   row: Record<string, unknown>,
   aliases: string[]
@@ -1010,7 +1038,7 @@ const resolveImportLookups = async (row: ImportRow, mode: "create" | "update") =
       ? selectedRep
       : currentUserName;
   const repName = row.rep || (mode === "create" ? fallbackRep : "");
-  const showName = row.show ? getImportShowValue(row.show) : "";
+  const showName = row.show.trim();
   const statusName = normalizeStatusValue(row.status);
 
   let repData: { id: string; name: string } | null = null;
@@ -1123,7 +1151,11 @@ const saveImportedCompany = async (
     if (row.address) updatePayload.address = row.address;
     if (latestNote) updatePayload.latest_note = latestNote;
     if (repData?.id) updatePayload.sales_rep_id = repData.id;
-    if (showData?.id) updatePayload.trade_show_id = showData.id;
+    if (!row.show.trim()) {
+      updatePayload.trade_show_id = null;
+    } else if (showData?.id) {
+      updatePayload.trade_show_id = showData.id;
+    }
     if (statusData?.id) updatePayload.status_id = statusData.id;
 
     const { data, error } = await supabase
@@ -1514,6 +1546,22 @@ setCustomSalesRep("");
 
   setAddModalOpen(false);
 };
+const downloadImportTemplate = () => {
+  const headers = "Company,Show,Sales Rep,Contact,Status,Email,Phone,Website,Notes";
+  const sampleRow =
+    "Example Company,Expo West,Dalin Marinos,John Smith,NONE,john@example.com,555-555-5555,https://example.com,Sample notes";
+  const csv = `${headers}\n${sampleRow}\n`;
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "pipeline-import-template.csv";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+};
+
 const prepareImportSheet = async (file: File) => {
   console.log("[Pipeline Import] file selected", file.name);
 
@@ -1549,6 +1597,17 @@ const prepareImportSheet = async (file: File) => {
       return;
     }
 
+    if (!sheetHasCompanyColumn(rows[0] || {})) {
+      showImportFeedback({
+        type: "error",
+        title: "Import failed",
+        details: [
+          "Company column not found. Use Company, Company Name, Distributor, Brand, Supplier, or Vendor.",
+        ],
+      });
+      return;
+    }
+
     const parsedRows = rows
       .map((row) => {
         const importedNotes = getImportedNotes(row);
@@ -1569,28 +1628,13 @@ const prepareImportSheet = async (file: File) => {
           "sheet notes",
         ]);
         const defaultRep = currentUserName || "Unassigned";
-        const companyName = getImportCellValue(row, [
-          "company",
-          "company name",
-          "company_name",
-          "supplier",
-          "supplier name",
-          "vendor",
-          "vendor name",
-        ]);
+        const companyName = getImportCellValue(row, COMPANY_IMPORT_ALIASES);
         const rawStatus = getImportCellValue(row, ["status"]);
         const normalizedStatus = normalizeCompanyStatus(rawStatus);
         console.log("[Import Status]", companyName, { rawStatus, normalizedStatus });
         const parsedRow: ImportRow = {
           company: companyName,
-          show: getImportCellValue(row, [
-            "stage",
-            "pipeline stage",
-            "show",
-            "trade show",
-            "tradeshow",
-            "trade_show",
-          ]),
+          show: getImportCellValue(row, SHOW_IMPORT_ALIASES),
           rep: getImportCellValue(row, [
             "rep",
             "sales rep",
@@ -1630,9 +1674,11 @@ const prepareImportSheet = async (file: File) => {
     }
 
     console.log("[Pipeline Import] parsed rows/data", parsedRows);
+    setImportSheetModalOpen(false);
     setPendingImportRows(parsedRows);
     setPendingImportFileName(file.name);
     setBulkImportSalesRep(parsedRows[0]?.rep || currentUserName || "Unassigned");
+    setBulkImportShow("");
     setImportPreviewOpen(true);
   } catch (error) {
     console.error("[Pipeline Import] invalid sheet format", error);
@@ -1721,6 +1767,7 @@ const processImportRows = async (
   setPendingImportFileName("");
   setPendingDuplicateImport(null);
   setBulkImportSalesRep("");
+  setBulkImportShow("");
 
   const details = [
     lastCompanyName ? `Company: ${lastCompanyName}` : "",
@@ -1782,6 +1829,16 @@ const applySalesRepToAllImportRows = () => {
   );
 };
 
+const applyShowToAllImportRows = () => {
+  setPendingImportRows((prev) =>
+    prev.map((row) => ({ ...row, show: bulkImportShow }))
+  );
+
+  setPendingDuplicateImport((prev) =>
+    prev ? { ...prev, row: { ...prev.row, show: bulkImportShow } } : prev
+  );
+};
+
 const importCellInputClass =
   "w-full rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-900 outline-none focus:border-[#4ade80]";
 
@@ -1789,20 +1846,17 @@ const getImportStatusValue = (status: string) => {
   return normalizeCompanyStatus(status);
 };
 
-const getImportShowOptions = () =>
-  Array.from(
-    new Set(
-      [
-        ...tradeShowOptions,
-        ...companyList.map((company) => company.show),
-        ...pendingImportRows.map((row) => row.show),
-      ].filter(Boolean)
-    )
-  );
-
-const getImportShowValue = (show: string) => {
-  const showOptions = getImportShowOptions();
-  return showOptions.includes(show) ? show : showOptions[0] || "";
+const getImportShowOptions = () => {
+  const options = new Set<string>([""]);
+  tradeShowOptions.forEach((show) => options.add(show));
+  companyList.forEach((company) => {
+    if (company.show) options.add(company.show);
+  });
+  pendingImportRows.forEach((row) => {
+    if (row.show) options.add(row.show);
+  });
+  if (bulkImportShow) options.add(bulkImportShow);
+  return Array.from(options);
 };
 useEffect(() => {
   if (!openMenuId) return;
@@ -2283,7 +2337,7 @@ useEffect(() => {
   <button
     onClick={() => {
       console.log("[Pipeline Import] import button clicked");
-      importFileRef.current?.click();
+      setImportSheetModalOpen(true);
     }}
     className="cursor-pointer rounded-2xl border border-gray-300 bg-[#f8f8f8] px-4 py-3 text-sm font-medium text-gray-700 hover:bg-white"
   >
@@ -4146,12 +4200,56 @@ setCompanyList((prev) =>
     )}
   </div>
 )}
+{importSheetModalOpen && (
+  <div
+    onClick={() => setImportSheetModalOpen(false)}
+    className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+  >
+    <div
+      onClick={(e) => e.stopPropagation()}
+      className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl"
+    >
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h3 className="text-2xl font-semibold">Import Sheet</h3>
+          <p className="mt-1 text-sm text-gray-500">
+            Upload a CSV or Excel file, or download the template to get started.
+          </p>
+        </div>
+        <button
+          onClick={() => setImportSheetModalOpen(false)}
+          className="cursor-pointer rounded-xl px-3 py-2 text-sm text-gray-500 hover:bg-gray-100"
+        >
+          ✕
+        </button>
+      </div>
+
+      <div className="mt-5 space-y-3">
+        <button
+          type="button"
+          onClick={downloadImportTemplate}
+          className="w-full cursor-pointer rounded-2xl border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+        >
+          Download Import Template
+        </button>
+        <button
+          type="button"
+          onClick={() => importFileRef.current?.click()}
+          className="w-full cursor-pointer rounded-2xl border border-[#4ade80] bg-[#4ade80] px-4 py-3 text-sm font-medium text-white transition hover:opacity-90"
+        >
+          Choose File to Import
+        </button>
+      </div>
+    </div>
+  </div>
+)}
 {importPreviewOpen && (
   <div
     onClick={() => {
       setImportPreviewOpen(false);
       setPendingDuplicateImport(null);
       setBulkImportSalesRep("");
+      setBulkImportShow("");
     }}
     className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
   >
@@ -4172,6 +4270,7 @@ setCompanyList((prev) =>
             setImportPreviewOpen(false);
             setPendingDuplicateImport(null);
             setBulkImportSalesRep("");
+            setBulkImportShow("");
           }}
           className="cursor-pointer rounded-xl px-3 py-2 text-sm text-gray-500 hover:bg-gray-100"
         >
@@ -4180,6 +4279,28 @@ setCompanyList((prev) =>
       </div>
 
       <div className="mt-5 flex flex-wrap items-end gap-3 rounded-2xl bg-[#f7f7f8] px-4 py-3">
+        <label className="w-56">
+          <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+            Show
+          </span>
+          <select
+            value={bulkImportShow}
+            onChange={(e) => setBulkImportShow(e.target.value)}
+            className={`${importCellInputClass} mt-1`}
+          >
+            {getImportShowOptions().map((show) => (
+              <option key={show || "__blank__"} value={show}>
+                {show || "No show"}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          onClick={applyShowToAllImportRows}
+          className="cursor-pointer rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50"
+        >
+          Apply to All
+        </button>
         <label className="w-56">
           <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
             Sales Rep
@@ -4232,13 +4353,13 @@ setCompanyList((prev) =>
                 </td>
                 <td className="px-2 py-2">
                   <select
-                    value={getImportShowValue(row.show)}
+                    value={row.show}
                     onChange={(e) => updatePendingImportRow(index, "show", e.target.value)}
                     className={importCellInputClass}
                   >
                     {getImportShowOptions().map((show) => (
-                      <option key={show} value={show}>
-                        {show}
+                      <option key={show || "__blank__"} value={show}>
+                        {show || "No show"}
                       </option>
                     ))}
                   </select>
@@ -4321,6 +4442,7 @@ setCompanyList((prev) =>
             setPendingImportFileName("");
             setPendingDuplicateImport(null);
             setBulkImportSalesRep("");
+            setBulkImportShow("");
           }}
           className="cursor-pointer rounded-2xl border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
         >
@@ -4392,7 +4514,7 @@ setCompanyList((prev) =>
                 </td>
                 <td className="px-2 py-2">
                   <select
-                    value={getImportShowValue(row.show)}
+                    value={row.show}
                     onChange={(e) =>
                       updatePendingImportRow(
                         pendingDuplicateImport.rowIndex,
@@ -4403,8 +4525,8 @@ setCompanyList((prev) =>
                     className={importCellInputClass}
                   >
                     {getImportShowOptions().map((show) => (
-                      <option key={show} value={show}>
-                        {show}
+                      <option key={show || "__blank__"} value={show}>
+                        {show || "No show"}
                       </option>
                     ))}
                   </select>

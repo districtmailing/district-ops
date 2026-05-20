@@ -1,34 +1,43 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { PoDetailLineRow } from "@/components/purchase-order/PoDetailLineRow";
+import { PoDetailToolbar } from "@/components/purchase-order/PoDetailToolbar";
+import { PoRowActionColumn } from "@/components/purchase-order/PoRowActionColumn";
+import { PoStatsPanel } from "@/components/purchase-order/PoStatsPanel";
+import { calculatePoStats } from "@/lib/poStats";
 import {
+  deletePurchaseOrder,
   getPurchaseOrder,
   listPurchaseOrderDocuments,
   listPurchaseOrderLineItems,
+  listPurchaseOrders,
+  mergePoLineItemsForDisplay,
+  moveLineItemsToPo,
   PurchaseOrder,
   PurchaseOrderDocument,
   PurchaseOrderLineItem,
   savePurchaseOrderDocumentMetadata,
   updatePurchaseOrder,
+  updatePurchaseOrderLineItem,
 } from "@/lib/purchaseOrders";
 import { supabase } from "@/lib/supabase";
+import { normalizePoStage } from "@/lib/poStageStyles";
+import {
+  DASHBOARD_CONTENT_PADDING_TOP,
+  DASHBOARD_STICKY_HEADER_TOP,
+  PO_DETAIL_GRID_COLUMNS,
+} from "@/lib/sheetRowLayout";
 
-const PO_STAGES = ["Sourcing", "Ordered", "Received", "Closed"];
-
-const columns: { label: string; key: keyof PurchaseOrderLineItem; kind?: "money" | "percent" | "number" | "image" }[] = [
-  { label: "Option / UPC", key: "upc" },
-  { label: "ASIN", key: "asin" },
-  { label: "Cost Info", key: "eachCost", kind: "money" },
-  { label: "Quantity / Min-Max", key: "units", kind: "number" },
-  { label: "Cases", key: "cases", kind: "number" },
-  { label: "Left Over", key: "leftOver", kind: "number" },
-  { label: "Buy Box", key: "buyBox", kind: "money" },
-  { label: "Profit", key: "profit", kind: "money" },
-  { label: "PM", key: "pm", kind: "percent" },
-  { label: "ROI", key: "roi", kind: "percent" },
-];
+const TABLE_COLUMNS = [
+  "",
+  "Option / UPC",
+  "ASIN",
+  "Cost Info",
+  "Quantity / Min-Max",
+] as const;
 
 function formatMoney(value: number | null) {
   if (value === null) return "—";
@@ -45,86 +54,29 @@ function formatPercent(value: number | null) {
   return `${value.toFixed(2)}%`;
 }
 
-function renderCell(item: PurchaseOrderLineItem, column: (typeof columns)[number]) {
-  const value = item[column.key];
-
-  if (column.label === "Option / UPC") {
-    return (
-      <div className="min-w-0">
-        <p className="truncate font-bold text-gray-900">{item.itemNumber || "—"}</p>
-        <p className="truncate font-mono text-[11px] text-gray-500">{item.upc || "—"}</p>
-        <p className="truncate text-[11px] text-gray-600">{item.supplierTitle || "—"}</p>
-      </div>
-    );
-  }
-
-  if (column.label === "ASIN") {
-    return (
-      <div className="flex min-w-[260px] items-center gap-2">
-        {item.amazonImage ? (
-          <img src={item.amazonImage} alt="" className="h-10 w-10 shrink-0 rounded-md object-contain" />
-        ) : (
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-400">—</span>
-        )}
-        <div className="min-w-0">
-          <p className="truncate rounded bg-amber-100 px-1.5 py-0.5 font-mono text-[11px] font-bold text-amber-900">{item.asin || "—"}</p>
-          <p className="mt-1 truncate text-[11px] font-medium text-gray-700">{item.amazonTitle || "No Amazon match title"}</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (column.label === "Cost Info") {
-    return (
-      <div className="space-y-0.5 text-[11px]">
-        <p><span className="text-gray-500">Want:</span> {formatMoney(item.wantEachCost ?? item.eachCost)} each / {formatMoney(item.wantCaseCost ?? item.caseCost)} case</p>
-        <p><span className="text-gray-500">Need:</span> {formatMoney(item.needEachCost)} each / {formatMoney(item.needCaseCost)} case</p>
-      </div>
-    );
-  }
-
-  if (column.label === "Quantity / Min-Max") {
-    return (
-      <div className="space-y-0.5 text-[11px]">
-        <p><span className="text-gray-500">Units:</span> {formatNumber(item.units)}</p>
-        <p><span className="text-gray-500">Case Size:</span> {item.caseSize || "—"} · <span className="text-gray-500">ASIN Amt:</span> {formatNumber(item.asinAmount)}</p>
-      </div>
-    );
-  }
-
-  if (column.kind === "image") {
-    const src = String(value || "");
-    return src ? (
-      <img src={src} alt="" className="h-10 w-10 rounded-md object-contain" />
-    ) : (
-      <span className="text-gray-400">—</span>
-    );
-  }
-
-  if (column.kind === "money") return formatMoney(value as number | null);
-  if (column.kind === "number") return formatNumber(value as number | null);
-  if (column.kind === "percent") {
-    const parsed = value as number | null;
-    return (
-      <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${parsed !== null && parsed < 0 ? "bg-rose-100 text-rose-800" : "bg-emerald-100 text-emerald-900"}`}>
-        {formatPercent(parsed)}
-      </span>
-    );
-  }
-
-  return String(value || "—");
-}
 
 export default function PurchaseOrderDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const poId = String(params.poId);
   const [purchaseOrder, setPurchaseOrder] = useState<PurchaseOrder | null>(null);
   const [lineItems, setLineItems] = useState<PurchaseOrderLineItem[]>([]);
   const [documents, setDocuments] = useState<PurchaseOrderDocument[]>([]);
+  const [allPurchaseOrders, setAllPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [asinFilter, setAsinFilter] = useState("all");
   const [sortBy, setSortBy] = useState<keyof PurchaseOrderLineItem>("createdAt");
+  const [sortAsc, setSortAsc] = useState(false);
+  const [toolbarCompact, setToolbarCompact] = useState(true);
+  const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
   const [stage, setStage] = useState("Sourcing");
+  const [poNameDraft, setPoNameDraft] = useState("");
+  const [editingPoName, setEditingPoName] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
+  const [commentsModalOpen, setCommentsModalOpen] = useState(false);
+  const [moveModalOpen, setMoveModalOpen] = useState(false);
+  const [moveTargetPoId, setMoveTargetPoId] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [documentModalOpen, setDocumentModalOpen] = useState(false);
@@ -145,10 +97,17 @@ export default function PurchaseOrderDetailPage() {
         ]);
 
         setPurchaseOrder(order);
-        setStage(order?.stage || "Sourcing");
+        setStage(normalizePoStage(order?.stage || "Sourcing"));
+        setPoNameDraft(order?.name || "");
         setNotesDraft(order?.notes || "");
-        setLineItems(items);
+        setLineItems(mergePoLineItemsForDisplay(items));
         setDocuments(docs);
+        if (order?.supplierSheetId) {
+          const relatedPos = await listPurchaseOrders({ supplierSheetId: order.supplierSheetId });
+          setAllPurchaseOrders(relatedPos.filter((po) => po.id !== poId));
+        } else {
+          setAllPurchaseOrders([]);
+        }
         setLoadMessage(order ? "" : "Purchase order not found.");
       } catch (error) {
         console.error("Error loading purchase order detail:", {
@@ -170,30 +129,76 @@ export default function PurchaseOrderDetailPage() {
     loadPo();
   }, [poId]);
 
+  useLayoutEffect(() => {
+    const el = document.querySelector("[data-dashboard-sidebar-collapsed]");
+    if (!el) return;
+    const read = () => {
+      setToolbarCompact(el.getAttribute("data-dashboard-sidebar-collapsed") === "true");
+    };
+    read();
+    const mo = new MutationObserver(read);
+    mo.observe(el, { attributes: true, attributeFilter: ["data-dashboard-sidebar-collapsed"] });
+    return () => mo.disconnect();
+  }, []);
+
   const filteredItems = useMemo(() => {
     const query = search.trim().toLowerCase();
-    const rows = query
-      ? lineItems.filter((item) =>
-          [
-            item.supplierTitle,
-            item.amazonTitle,
-            item.asin,
-            item.upc,
-            item.itemNumber,
-            item.supplierSheetId,
-          ]
-            .join(" ")
-            .toLowerCase()
-            .includes(query)
-        )
-      : [...lineItems];
+    let rows = [...lineItems];
+    if (asinFilter === "with-asin") {
+      rows = rows.filter((item) => item.asin.trim().length > 0);
+    } else if (asinFilter === "no-asin") {
+      rows = rows.filter((item) => !item.asin.trim());
+    }
+    if (query) {
+      rows = rows.filter((item) =>
+        [
+          item.supplierTitle,
+          item.amazonTitle,
+          item.asin,
+          item.upc,
+          item.itemNumber,
+          item.supplierSheetId,
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(query)
+      );
+    }
 
-    return rows.sort((a, b) => String(b[sortBy] || "").localeCompare(String(a[sortBy] || "")));
-  }, [lineItems, search, sortBy]);
+    return rows.sort((a, b) => {
+      const cmp = String(a[sortBy] ?? "").localeCompare(String(b[sortBy] ?? ""), undefined, {
+        numeric: true,
+      });
+      return sortAsc ? cmp : -cmp;
+    });
+  }, [lineItems, search, asinFilter, sortBy, sortAsc]);
+
+  const poStats = useMemo(() => calculatePoStats(lineItems), [lineItems]);
 
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
   const safePage = Math.min(page, totalPages);
   const pageItems = filteredItems.slice((safePage - 1) * pageSize, safePage * pageSize);
+
+  const allPageSelected =
+    pageItems.length > 0 && pageItems.every((item) => selectedRowIds.has(item.id));
+
+  const toggleSelectAll = (checked: boolean) => {
+    setSelectedRowIds((prev) => {
+      const next = new Set(prev);
+      pageItems.forEach((item) => {
+        if (checked) next.add(item.id);
+        else next.delete(item.id);
+      });
+      return next;
+    });
+  };
+
+  const copyPoLink = () => {
+    const url = window.location.href;
+    void navigator.clipboard.writeText(url);
+    setToast("PO link copied");
+    window.setTimeout(() => setToast(""), 1800);
+  };
   const totalCost = filteredItems.reduce((sum, item) => sum + (item.caseCost || item.eachCost || 0), 0);
   const totalProfit = filteredItems.reduce((sum, item) => sum + (item.profit || 0), 0);
 
@@ -201,6 +206,55 @@ export default function PurchaseOrderDetailPage() {
     setStage(nextStage);
     await updatePurchaseOrder(poId, { stage: nextStage });
     setPurchaseOrder((prev) => (prev ? { ...prev, stage: nextStage } : prev));
+  };
+
+  const savePoName = async () => {
+    const trimmed = poNameDraft.trim();
+    if (!trimmed) return;
+    await updatePurchaseOrder(poId, { name: trimmed });
+    setPurchaseOrder((prev) => (prev ? { ...prev, name: trimmed } : prev));
+    setEditingPoName(false);
+    setToast("PO name saved");
+    window.setTimeout(() => setToast(""), 1800);
+  };
+
+  const handleDeletePo = async () => {
+    const confirmed = window.confirm(
+      `Delete PO "${purchaseOrder?.name}" and all line items? This cannot be undone.`
+    );
+    if (!confirmed) return;
+    await deletePurchaseOrder(poId);
+    router.push("/dashboard/purchase-order");
+  };
+
+  const handleMoveAllItems = async () => {
+    if (!moveTargetPoId || lineItems.length === 0) return;
+    await moveLineItemsToPo(
+      lineItems.map((item) => item.id),
+      moveTargetPoId
+    );
+    setMoveModalOpen(false);
+    router.push(`/dashboard/purchase-order/${moveTargetPoId}`);
+  };
+
+  const copyWantToGot = async () => {
+    await Promise.all(
+      lineItems.map((item) =>
+        updatePurchaseOrderLineItem(item.id, {
+          needEachCost: item.wantEachCost ?? item.eachCost,
+          needCaseCost: item.wantCaseCost ?? item.caseCost,
+        })
+      )
+    );
+    const items = await listPurchaseOrderLineItems(poId);
+    setLineItems(mergePoLineItemsForDisplay(items));
+    setToast("Copied want costs to need");
+    window.setTimeout(() => setToast(""), 1800);
+  };
+
+  const copyNeedToGot = async () => {
+    setToast("Need costs are already in the Got column for this view.");
+    window.setTimeout(() => setToast(""), 1800);
   };
 
   const saveNotes = async () => {
@@ -275,97 +329,102 @@ export default function PurchaseOrderDetailPage() {
   }
 
   return (
-    <section className="relative flex min-h-0 min-w-0 flex-1 flex-col border-r border-gray-200 bg-[#f0f2f5] text-[#111827]">
-      <div className="sticky top-[77px] z-40 border-b border-gray-200 bg-white px-4 py-3 shadow-sm">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <Link href="/dashboard/purchase-order" className="rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50">
-            ← POs
-          </Link>
-          <button
-            type="button"
-            onClick={() => setDocumentModalOpen(true)}
-            className="flex h-9 w-9 items-center justify-center rounded-xl border border-[#8aa6d8] bg-white text-[#334155] hover:bg-gray-50"
-            title="PO documents and notes"
-          >
-            📎
-          </button>
-          <div className="min-w-[180px] flex-1">
-            <p className="truncate text-lg font-bold">{purchaseOrder?.name || poId}</p>
-            <p className="text-xs text-gray-500">{lineItems.length} line items · {formatMoney(totalCost)} cost · {formatMoney(totalProfit)} profit</p>
+    <section className="min-h-screen bg-[#f7f8fa] text-[#111827]">
+      <PoDetailToolbar
+        poId={poId}
+        poName={purchaseOrder.name}
+        poNameDraft={poNameDraft}
+        editingPoName={editingPoName}
+        stage={stage}
+        search={search}
+        asinFilter={asinFilter}
+        sortBy={sortBy}
+        sortAsc={sortAsc}
+        statsOpen={statsOpen}
+        toolbarCompact={toolbarCompact}
+        onPoNameDraftChange={setPoNameDraft}
+        onStartEditName={() => setEditingPoName(true)}
+        onSavePoName={savePoName}
+        onStageChange={changeStage}
+        onSearchChange={(v) => { setSearch(v); setPage(1); }}
+        onAsinFilterChange={(v) => { setAsinFilter(v); setPage(1); }}
+        onSortByChange={(v) => setSortBy(v as keyof PurchaseOrderLineItem)}
+        onSortAscChange={setSortAsc}
+        onToggleStats={() => setStatsOpen((v) => !v)}
+        onCopyLink={copyPoLink}
+        onOpenComments={() => setCommentsModalOpen(true)}
+        onOpenMove={() => setMoveModalOpen(true)}
+        onOpenDocuments={() => setDocumentModalOpen(true)}
+      />
+
+      <div className="pb-[68px]" style={{ paddingTop: DASHBOARD_CONTENT_PADDING_TOP }}>
+        {statsOpen && (
+          <div className="px-4 pb-3 lg:px-6">
+            <PoStatsPanel
+              stats={poStats}
+              lineItems={lineItems}
+              onCopyWantToGot={copyWantToGot}
+              onCopyNeedToGot={copyNeedToGot}
+            />
           </div>
-          <select
-            value={stage}
-            onChange={(event) => changeStage(event.target.value)}
-            className="h-9 rounded-xl border border-gray-300 bg-white px-3 text-sm font-semibold outline-none"
-          >
-            {PO_STAGES.map((option) => (
-              <option key={option} value={option}>{option}</option>
-            ))}
-          </select>
-          <input
-            value={search}
-            onChange={(event) => {
-              setSearch(event.target.value);
-              setPage(1);
-            }}
-            placeholder="Search inside PO..."
-            className="h-9 w-[220px] rounded-xl border border-gray-300 bg-white px-3 text-sm outline-none"
-          />
-          <select
-            value={sortBy}
-            onChange={(event) => setSortBy(event.target.value as keyof PurchaseOrderLineItem)}
-            className="h-9 rounded-xl border border-gray-300 bg-white px-3 text-sm outline-none"
-          >
-            <option value="createdAt">Newest</option>
-            <option value="supplierTitle">Supplier Title</option>
-            <option value="asin">ASIN</option>
-            <option value="upc">UPC</option>
-            <option value="profit">Profit</option>
-          </select>
+        )}
+
+        <div className="mt-2 px-4 lg:px-6">
+          <div className="overflow-hidden rounded-2xl border border-[#c9ced6] bg-white shadow-sm">
+            <div
+              className="sticky z-40 grid min-h-[52px] border-b border-[#d7dde7] bg-[#f0f1f3] text-[11px] font-bold uppercase tracking-wide text-gray-700"
+              style={{
+                top: DASHBOARD_STICKY_HEADER_TOP,
+                gridTemplateColumns: PO_DETAIL_GRID_COLUMNS,
+              }}
+            >
+              {TABLE_COLUMNS.map((column, i) => (
+                <div
+                  key={column || "actions"}
+                  className={`flex min-h-[52px] items-center justify-center border-r border-[#d7dde7] px-2 py-2 last:border-r-0 ${
+                    i === 0 ? "sticky left-0 z-50 bg-[#f0f1f3]" : ""
+                  }`}
+                >
+                  {i === 0 ? (
+                    <PoRowActionColumn
+                      showSelectAll
+                      allSelected={allPageSelected}
+                      onSelectAll={toggleSelectAll}
+                    />
+                  ) : (
+                    column
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="overflow-x-auto overflow-y-visible">
+              {pageItems.length === 0 ? (
+                <p className="px-4 py-12 text-center text-sm text-gray-500">
+                  No line items saved to this purchase order yet. Add items from the supplier sheet.
+                </p>
+              ) : (
+                pageItems.map((item, index) => (
+                  <PoDetailLineRow
+                    key={item.id}
+                    item={item}
+                    index={(safePage - 1) * pageSize + index + 1}
+                    selected={selectedRowIds.has(item.id)}
+                    onSelectedChange={(checked) => {
+                      setSelectedRowIds((prev) => {
+                        const next = new Set(prev);
+                        if (checked) next.add(item.id);
+                        else next.delete(item.id);
+                        return next;
+                      });
+                    }}
+                  />
+                ))
+              )}
+            </div>
+          </div>
         </div>
       </div>
-
-      <div className="min-w-0 flex-1 px-3 pb-20 sm:px-4 lg:px-5">
-        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-          <div className="max-h-[calc(100vh-220px)] overflow-auto">
-            <table className="w-full min-w-[1900px] border-collapse text-left text-[12px]">
-              <thead className="sticky top-0 z-20 bg-[#e8ecf1] text-[11px] font-bold uppercase tracking-wide text-gray-800">
-                <tr>
-                  <th className="border-r border-gray-200 px-2 py-2 text-center">No</th>
-                  {columns.map((column) => (
-                    <th key={column.key} className="whitespace-nowrap border-r border-gray-200 px-2 py-2">
-                      {column.label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="bg-white">
-                {pageItems.length === 0 ? (
-                  <tr>
-                    <td colSpan={columns.length + 1} className="px-4 py-12 text-center text-sm text-gray-500">
-                      No line items saved to this purchase order yet.
-                    </td>
-                  </tr>
-                ) : (
-                  pageItems.map((item, index) => (
-                    <tr key={item.id} className="border-b border-gray-200 hover:bg-gray-50">
-                      <td className="border-r border-gray-200 px-2 py-2 text-center tabular-nums text-gray-600">
-                        {(safePage - 1) * pageSize + index + 1}
-                      </td>
-                      {columns.map((column) => (
-                        <td key={column.key} className="max-w-[240px] truncate border-r border-gray-200 px-2 py-2 text-gray-800">
-                          {renderCell(item, column)}
-                        </td>
-                      ))}
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
       <footer
         className="fixed bottom-0 z-[60] flex min-h-[52px] flex-wrap items-center justify-between gap-3 border-t border-gray-200 bg-white px-4 py-2 text-[12px] text-[#111827]"
         style={{ left: "var(--sidebar-width)", right: 0 }}
@@ -382,6 +441,44 @@ export default function PurchaseOrderDetailPage() {
           <button onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))} disabled={safePage >= totalPages} className="rounded-md border border-gray-300 bg-white px-3 py-1.5 font-semibold disabled:opacity-40">Next</button>
         </div>
       </footer>
+
+      {commentsModalOpen && purchaseOrder && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 px-4" onClick={() => setCommentsModalOpen(false)}>
+          <div className="w-full max-w-lg rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-xl font-bold">PO Comments</h2>
+            <p className="mt-1 text-sm text-gray-500">{purchaseOrder.name}</p>
+            <textarea
+              value={notesDraft}
+              onChange={(e) => setNotesDraft(e.target.value)}
+              className="mt-4 min-h-[160px] w-full rounded-xl border border-gray-300 px-3 py-2 text-sm outline-none"
+              placeholder="Add comments for this purchase order..."
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" onClick={() => setCommentsModalOpen(false)} className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold">Cancel</button>
+              <button type="button" onClick={async () => { await saveNotes(); setCommentsModalOpen(false); }} className="rounded-xl bg-[#22c55e] px-4 py-2 text-sm font-semibold text-white">Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {moveModalOpen && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 px-4" onClick={() => setMoveModalOpen(false)}>
+          <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-bold">Move items to another PO</h2>
+            <p className="mt-1 text-sm text-gray-500">All {lineItems.length} line items will move to the selected PO.</p>
+            <select value={moveTargetPoId} onChange={(e) => setMoveTargetPoId(e.target.value)} className="mt-4 h-10 w-full rounded-xl border border-gray-300 px-3 text-sm">
+              <option value="">Select PO...</option>
+              {allPurchaseOrders.map((po) => (
+                <option key={po.id} value={po.id}>{po.name}</option>
+              ))}
+            </select>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" onClick={() => setMoveModalOpen(false)} className="rounded-xl border border-gray-300 px-4 py-2 text-sm">Cancel</button>
+              <button type="button" onClick={handleMoveAllItems} disabled={!moveTargetPoId} className="rounded-xl bg-[#3b82f6] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Move All</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {documentModalOpen && purchaseOrder && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 px-4" onClick={() => setDocumentModalOpen(false)}>

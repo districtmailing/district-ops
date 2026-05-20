@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { PoStagePill } from "@/components/purchase-order/PoStagePill";
 import { listPurchaseOrders } from "@/lib/purchaseOrders";
+import { PO_STAGES, normalizePoStage } from "@/lib/poStageStyles";
 
 type PoRow = {
   id: string;
@@ -26,15 +28,7 @@ function parseSlashDate(s: string): number {
   return new Date(yy, mm - 1, dd).getTime();
 }
 
-const STAGES = ["Sourcing", "Ordered", "Received", "Closed"] as const;
-
-function StagePill({ stage }: { stage: string }) {
-  return (
-    <span className="inline-flex rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-semibold text-sky-900">
-      {stage}
-    </span>
-  );
-}
+const STAGES = PO_STAGES;
 
 function SheetsPill({ n }: { n: number }) {
   return (
@@ -130,7 +124,7 @@ export default function PurchaseOrdersPage() {
           savedOrders.map((order) => ({
             id: order.id,
             name: order.name,
-            stage: order.stage || "Sourcing",
+            stage: normalizePoStage(order.stage || "Sourcing"),
             supplier: order.supplier || "—",
             sheets: 0,
             asinQty: 0,
@@ -452,7 +446,7 @@ export default function PurchaseOrdersPage() {
                         </Link>
                       </td>
                       <td className="border-r border-gray-200 px-2 py-1.5">
-                        <StagePill stage={row.stage} />
+                        <PoStagePill stage={row.stage} />
                       </td>
                       <td className="border-r border-gray-200 px-2 py-1.5 text-gray-800">{row.supplier}</td>
                       <td className="border-r border-gray-200 px-2 py-1.5 text-center">

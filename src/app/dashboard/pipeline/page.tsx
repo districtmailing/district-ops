@@ -200,6 +200,10 @@ function formatWebsiteUrl(url: string) {
 
 const STATUS_OPTIONS = ["NONE", "WIP", "Company Call Done", "YES", "NO"];
 const IMPORT_STATUS_OPTIONS = STATUS_OPTIONS;
+const IMPORT_ADD_NEW_REP = "__ADD_NEW_REP__";
+const IMPORT_ADD_NEW_SHOW = "__ADD_NEW_SHOW__";
+const TEMPLATE_DEFAULT_USER = "Current User";
+const TEMPLATE_DEFAULT_SHOW = "ASD";
 
 function normalizeCompanyStatus(value: unknown) {
   if (value === null || value === undefined) return "NONE";
@@ -322,6 +326,14 @@ const [bulkImportSalesRep, setBulkImportSalesRep] = useState("");
 const [bulkImportShow, setBulkImportShow] = useState("");
 const [customTradeShow, setCustomTradeShow] = useState("");
 const [customSalesRep, setCustomSalesRep] = useState("");
+const [importSessionReps, setImportSessionReps] = useState<string[]>([]);
+const [importSessionShows, setImportSessionShows] = useState<string[]>([]);
+const [showImportNewRepInput, setShowImportNewRepInput] = useState(false);
+const [showImportNewShowInput, setShowImportNewShowInput] = useState(false);
+const [importNewRepDraft, setImportNewRepDraft] = useState("");
+const [importNewShowDraft, setImportNewShowDraft] = useState("");
+const [companySelectionMode, setCompanySelectionMode] = useState(false);
+const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([]);
 const [companyList, setCompanyList] = useState<Company[]>([]);
 const [companyNotes, setCompanyNotes] = useState<
   Record<string, { date: string; time: string; type: string; text: string }[]>
@@ -1069,13 +1081,35 @@ const resolveImportLookups = async (row: ImportRow, mode: "create" | "update") =
     }
   }
 
-  const { data: showData } = showName
-    ? await supabase
+  let showData: { id: string; name: string } | null = null;
+
+  if (showName) {
+    const { data: existingShow } = await supabase
+      .from("trade_shows")
+      .select("id, name")
+      .eq("name", showName)
+      .maybeSingle();
+
+    showData = existingShow;
+
+    if (!showData && currentTeamId) {
+      const { data: insertedShow, error: insertShowError } = await supabase
         .from("trade_shows")
+        .insert([{ name: showName, team_id: currentTeamId }])
         .select("id, name")
-        .eq("name", showName)
-        .maybeSingle()
-    : { data: null };
+        .single();
+
+      if (insertShowError) {
+        console.error("[Pipeline Import] save failure", insertShowError);
+        throw new Error("save failed while saving imported trade show");
+      }
+
+      showData = insertedShow;
+      setTradeShowOptions((prev) =>
+        prev.includes(showName) ? prev : [...prev, showName].sort()
+      );
+    }
+  }
 
   const statusData = statusName ? await resolveStatusData(statusName) : null;
 
@@ -1247,6 +1281,31 @@ statuses:status_id(name)
   return { company: formattedCompany, notesImported, updated: false };
 };
 
+const removeCompaniesFromState = (companyIds: string[]) => {
+  const idsToRemove = new Set(companyIds);
+
+  setCompanyList((prev) => {
+    const next = prev.filter((company) => !idsToRemove.has(company.id));
+
+    if (selectedCompanyId && idsToRemove.has(selectedCompanyId)) {
+      setSelectedCompanyId(next[0]?.id || "");
+      setDetailsOpen(false);
+    }
+
+    return next;
+  });
+
+  setCompanyNotes((prev) => {
+    const updated = { ...prev };
+    companyIds.forEach((id) => {
+      delete updated[id];
+    });
+    return updated;
+  });
+
+  setOpenMenuId(null);
+};
+
 const deleteCompany = async (companyId: string) => {
   const companyToDelete = companyList.find((c) => c.id === companyId);
   if (!companyToDelete) return;
@@ -1266,21 +1325,67 @@ const deleteCompany = async (companyId: string) => {
     return;
   }
 
-  setCompanyList((prev) => prev.filter((company) => company.id !== companyId));
+  removeCompaniesFromState([companyId]);
+};
 
-  setCompanyNotes((prev) => {
-    const updated = { ...prev };
-    delete updated[companyId];
-    return updated;
-  });
+const deleteSelectedCompanies = async () => {
+  if (selectedCompanyIds.length === 0) return;
 
-  setOpenMenuId(null);
+  const count = selectedCompanyIds.length;
+  const confirmed = window.confirm(
+    `Are you sure you want to delete ${count} selected companies?`
+  );
+  if (!confirmed) return;
 
-  if (selectedCompanyId === companyId) {
-    const remainingCompanies = companyList.filter((company) => company.id !== companyId);
-    setSelectedCompanyId(remainingCompanies[0]?.id || "");
-    setDetailsOpen(false);
+  const { error } = await supabase
+    .from("companies")
+    .delete()
+    .in("id", selectedCompanyIds);
+
+  if (error) {
+    console.error("Error deleting selected companies:", error);
+    return;
   }
+
+  removeCompaniesFromState(selectedCompanyIds);
+  setSelectedCompanyIds([]);
+  setCompanySelectionMode(false);
+};
+
+const toggleCompanySelection = (companyId: string) => {
+  setSelectedCompanyIds((prev) =>
+    prev.includes(companyId)
+      ? prev.filter((id) => id !== companyId)
+      : [...prev, companyId]
+  );
+};
+
+const selectAllVisibleCompanies = () => {
+  setSelectedCompanyIds(filteredCompanies.map((company) => company.id));
+};
+
+const clearCompanySelection = () => {
+  setSelectedCompanyIds([]);
+};
+
+const exitCompanySelectionMode = () => {
+  setCompanySelectionMode(false);
+  setSelectedCompanyIds([]);
+};
+
+const resetImportPreviewState = () => {
+  setImportPreviewOpen(false);
+  setPendingImportRows([]);
+  setPendingImportFileName("");
+  setPendingDuplicateImport(null);
+  setBulkImportSalesRep("");
+  setBulkImportShow("");
+  setImportSessionReps([]);
+  setImportSessionShows([]);
+  setShowImportNewRepInput(false);
+  setShowImportNewShowInput(false);
+  setImportNewRepDraft("");
+  setImportNewShowDraft("");
 };
 
 const saveNewCompany = async () => {
@@ -1546,10 +1651,29 @@ setCustomSalesRep("");
 
   setAddModalOpen(false);
 };
+const escapeCsvValue = (value: string) => {
+  if (/[",\n]/.test(value)) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+};
+
 const downloadImportTemplate = () => {
   const headers = "Company,Show,Sales Rep,Contact,Status,Email,Phone,Website,Notes";
-  const sampleRow =
-    "Example Company,Expo West,Dalin Marinos,John Smith,NONE,john@example.com,555-555-5555,https://example.com,Sample notes";
+  const salesRepSample = currentUserName || TEMPLATE_DEFAULT_USER;
+  const sampleRow = [
+    "Example Company",
+    TEMPLATE_DEFAULT_SHOW,
+    salesRepSample,
+    "John Smith",
+    "NONE",
+    "john@example.com",
+    "555-555-5555",
+    "https://example.com",
+    "Sample notes",
+  ]
+    .map(escapeCsvValue)
+    .join(",");
   const csv = `${headers}\n${sampleRow}\n`;
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
@@ -1627,7 +1751,7 @@ const prepareImportSheet = async (file: File) => {
           "sheet_notes",
           "sheet notes",
         ]);
-        const defaultRep = currentUserName || "Unassigned";
+        const defaultRep = currentUserName || TEMPLATE_DEFAULT_USER;
         const companyName = getImportCellValue(row, COMPANY_IMPORT_ALIASES);
         const rawStatus = getImportCellValue(row, ["status"]);
         const normalizedStatus = normalizeCompanyStatus(rawStatus);
@@ -1677,8 +1801,16 @@ const prepareImportSheet = async (file: File) => {
     setImportSheetModalOpen(false);
     setPendingImportRows(parsedRows);
     setPendingImportFileName(file.name);
-    setBulkImportSalesRep(parsedRows[0]?.rep || currentUserName || "Unassigned");
+    setBulkImportSalesRep(
+      parsedRows[0]?.rep || currentUserName || TEMPLATE_DEFAULT_USER
+    );
     setBulkImportShow("");
+    setImportSessionReps([]);
+    setImportSessionShows([]);
+    setShowImportNewRepInput(false);
+    setShowImportNewShowInput(false);
+    setImportNewRepDraft("");
+    setImportNewShowDraft("");
     setImportPreviewOpen(true);
   } catch (error) {
     console.error("[Pipeline Import] invalid sheet format", error);
@@ -1762,12 +1894,7 @@ const processImportRows = async (
     }
   }
 
-  setImportPreviewOpen(false);
-  setPendingImportRows([]);
-  setPendingImportFileName("");
-  setPendingDuplicateImport(null);
-  setBulkImportSalesRep("");
-  setBulkImportShow("");
+  resetImportPreviewState();
 
   const details = [
     lastCompanyName ? `Company: ${lastCompanyName}` : "",
@@ -1792,12 +1919,45 @@ const getImportSalesRepOptions = () =>
       [
         "Unassigned",
         currentUserName,
+        TEMPLATE_DEFAULT_USER,
         ...repOptions,
         ...teamMemberRepOptions,
+        ...importSessionReps,
         ...pendingImportRows.map((row) => row.rep),
+        bulkImportSalesRep,
       ].filter(Boolean)
     )
+  ).sort((a, b) => a.localeCompare(b));
+
+const confirmImportNewRep = () => {
+  const trimmedName = importNewRepDraft.trim();
+  if (!trimmedName) return;
+
+  setImportSessionReps((prev) =>
+    prev.includes(trimmedName) ? prev : [...prev, trimmedName]
   );
+  setRepOptions((prev) =>
+    prev.includes(trimmedName) ? prev : [...prev, trimmedName].sort()
+  );
+  setBulkImportSalesRep(trimmedName);
+  setShowImportNewRepInput(false);
+  setImportNewRepDraft("");
+};
+
+const confirmImportNewShow = () => {
+  const trimmedName = importNewShowDraft.trim();
+  if (!trimmedName) return;
+
+  setImportSessionShows((prev) =>
+    prev.includes(trimmedName) ? prev : [...prev, trimmedName]
+  );
+  setTradeShowOptions((prev) =>
+    prev.includes(trimmedName) ? prev : [...prev, trimmedName].sort()
+  );
+  setBulkImportShow(trimmedName);
+  setShowImportNewShowInput(false);
+  setImportNewShowDraft("");
+};
 
 const updatePendingImportRow = (
   index: number,
@@ -1849,6 +2009,7 @@ const getImportStatusValue = (status: string) => {
 const getImportShowOptions = () => {
   const options = new Set<string>([""]);
   tradeShowOptions.forEach((show) => options.add(show));
+  importSessionShows.forEach((show) => options.add(show));
   companyList.forEach((company) => {
     if (company.show) options.add(company.show);
   });
@@ -1856,7 +2017,11 @@ const getImportShowOptions = () => {
     if (row.show) options.add(row.show);
   });
   if (bulkImportShow) options.add(bulkImportShow);
-  return Array.from(options);
+  return Array.from(options).sort((a, b) => {
+    if (!a) return -1;
+    if (!b) return 1;
+    return a.localeCompare(b);
+  });
 };
 useEffect(() => {
   if (!openMenuId) return;
@@ -2631,7 +2796,49 @@ useEffect(() => {
 </div>
                         </div>
 
-            <div className="mt-5 flex items-center justify-end">
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-2">
+  <div className="flex flex-wrap items-center gap-2">
+    {!companySelectionMode ? (
+      <button
+        onClick={() => {
+          setCompanySelectionMode(true);
+          setSelectedCompanyIds([]);
+        }}
+        className="cursor-pointer rounded-2xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+      >
+        Select Companies
+      </button>
+    ) : (
+      <>
+        <button
+          onClick={selectAllVisibleCompanies}
+          className="cursor-pointer rounded-2xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+        >
+          Select All
+        </button>
+        <button
+          onClick={clearCompanySelection}
+          className="cursor-pointer rounded-2xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+        >
+          Clear Selection
+        </button>
+        <button
+          onClick={deleteSelectedCompanies}
+          disabled={selectedCompanyIds.length === 0}
+          className="cursor-pointer rounded-2xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Delete Selected
+          {selectedCompanyIds.length > 0 ? ` (${selectedCompanyIds.length})` : ""}
+        </button>
+        <button
+          onClick={exitCompanySelectionMode}
+          className="cursor-pointer rounded-2xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+        >
+          Cancel
+        </button>
+      </>
+    )}
+  </div>
   <button
     onClick={() => setShowCompanyList((prev) => !prev)}
     className="cursor-pointer rounded-2xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
@@ -2651,6 +2858,9 @@ useEffect(() => {
                 <table className="w-full table-auto text-left">
                   <thead className="sticky top-0 z-10 bg-[#f0f1f3] text-xs uppercase tracking-wide text-gray-500">
   <tr>
+  {companySelectionMode && (
+    <th className="w-10 px-3 py-4 font-semibold" aria-label="Select" />
+  )}
   <th className="w-[23%] px-5 py-4 font-semibold">Company</th>
   <th className="w-[15%] px-5 py-4 font-semibold">Contact</th>
   <th className="w-[11%] px-5 py-4 text-center font-semibold">Status</th>
@@ -2664,7 +2874,11 @@ useEffect(() => {
                     {filteredCompanies.map((company) => (
                       <tr
   key={company.id}
-  className="cursor-pointer align-middle"
+  className={`cursor-pointer align-middle ${
+    companySelectionMode && selectedCompanyIds.includes(company.id)
+      ? "bg-blue-50/60"
+      : ""
+  }`}
   onClick={() => {
   if (openMenuId) {
     setOpenMenuId(null);
@@ -2678,27 +2892,59 @@ useEffect(() => {
     return;
   }
 
+  if (companySelectionMode) {
+    toggleCompanySelection(company.id);
+    return;
+  }
+
   setSelectedCompanyId(company.id);
   setDetailsOpen(true);
   setActiveTab("Overview");
 }}
 >
-                  <td className="px-5 py-4 align-middle">
-  <div className="min-w-0">
-    <div className="flex items-start gap-2">
-      <p className="max-w-[220px] font-semibold leading-5 break-words">{company.company}</p>
+                  {companySelectionMode && (
+                    <td className="px-3 py-4 align-middle">
+                      <input
+                        type="checkbox"
+                        checked={selectedCompanyIds.includes(company.id)}
+                        onChange={() => toggleCompanySelection(company.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="h-4 w-4 cursor-pointer rounded border-gray-300"
+                        aria-label={`Select ${company.company}`}
+                      />
+                    </td>
+                  )}
+                  <td className="max-w-0 px-5 py-4 align-middle">
+  <div className="min-w-0 line-clamp-3 leading-5">
+    <div className="flex min-w-0 items-start gap-2">
+      <p
+        className="min-w-0 truncate font-semibold"
+        title={company.company}
+      >
+        {company.company}
+      </p>
 
       {shouldShowWarning(company) && (
         <span className="mt-0.5 shrink-0 text-sm text-amber-500">⚠️</span>
       )}
     </div>
 
-    <p className="mt-2 text-sm leading-6 text-gray-500">
+    <p
+      className="mt-1 truncate text-sm text-gray-500"
+      title={`${company.show} · ${company.rep}`}
+    >
       {company.show} · {company.rep}
     </p>
   </div>
 </td>
-                        <td className="px-5 py-4 font-medium">{company.contact || "—"}</td>
+                        <td className="max-w-0 px-5 py-4 align-middle">
+                          <p
+                            className="truncate font-medium"
+                            title={company.contact || undefined}
+                          >
+                            {company.contact || "—"}
+                          </p>
+                        </td>
                         <td className="px-5 py-4 relative">
   <button
     onClick={(e) => {
@@ -2756,19 +3002,24 @@ useEffect(() => {
     </div>
   )}
 </td>
-                        <td className="px-5 py-4 text-gray-600">
-                          {company.email || "—"}
-                          <br />
-                          {company.phone || "—"}
+                        <td className="max-w-0 px-5 py-4 align-middle text-gray-600">
+                          <div className="min-w-0 line-clamp-2 leading-5">
+                            <p className="truncate" title={company.email || undefined}>
+                              {company.email || "—"}
+                            </p>
+                            <p className="truncate" title={company.phone || undefined}>
+                              {company.phone || "—"}
+                            </p>
+                          </div>
                         </td>
-                        <td className="px-5 py-4 text-gray-600">
+                        <td className="max-w-0 px-5 py-4 align-middle text-gray-600">
   {company.website ? (
     <a
       href={formatWebsiteUrl(company.website)}
       target="_blank"
       rel="noopener noreferrer"
       onClick={(e) => e.stopPropagation()}
-      className="inline-block max-w-full break-all text-blue-600 underline-offset-4 hover:underline"
+      className="block min-w-0 truncate text-blue-600 underline-offset-4 hover:underline"
       title={company.website}
     >
       {company.website}
@@ -4246,10 +4497,8 @@ setCompanyList((prev) =>
 {importPreviewOpen && (
   <div
     onClick={() => {
-      setImportPreviewOpen(false);
       setPendingDuplicateImport(null);
-      setBulkImportSalesRep("");
-      setBulkImportShow("");
+      resetImportPreviewState();
     }}
     className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
   >
@@ -4267,10 +4516,8 @@ setCompanyList((prev) =>
 
         <button
           onClick={() => {
-            setImportPreviewOpen(false);
             setPendingDuplicateImport(null);
-            setBulkImportSalesRep("");
-            setBulkImportShow("");
+            resetImportPreviewState();
           }}
           className="cursor-pointer rounded-xl px-3 py-2 text-sm text-gray-500 hover:bg-gray-100"
         >
@@ -4278,52 +4525,132 @@ setCompanyList((prev) =>
         </button>
       </div>
 
-      <div className="mt-5 flex flex-wrap items-end gap-3 rounded-2xl bg-[#f7f7f8] px-4 py-3">
-        <label className="w-56">
-          <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-            Show
-          </span>
-          <select
-            value={bulkImportShow}
-            onChange={(e) => setBulkImportShow(e.target.value)}
-            className={`${importCellInputClass} mt-1`}
+      <div className="mt-5 space-y-3 rounded-2xl bg-[#f7f7f8] px-4 py-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="w-56">
+            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Show
+            </span>
+            <select
+              value={showImportNewShowInput ? IMPORT_ADD_NEW_SHOW : bulkImportShow}
+              onChange={(e) => {
+                if (e.target.value === IMPORT_ADD_NEW_SHOW) {
+                  setShowImportNewShowInput(true);
+                  setImportNewShowDraft("");
+                  return;
+                }
+                setShowImportNewShowInput(false);
+                setBulkImportShow(e.target.value);
+              }}
+              className={`${importCellInputClass} mt-1`}
+            >
+              {getImportShowOptions().map((show) => (
+                <option key={show || "__blank__"} value={show}>
+                  {show || "No show"}
+                </option>
+              ))}
+              <option value={IMPORT_ADD_NEW_SHOW}>+ Add New Show</option>
+            </select>
+          </label>
+          <button
+            onClick={applyShowToAllImportRows}
+            disabled={!bulkImportShow || showImportNewShowInput}
+            className="cursor-pointer rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {getImportShowOptions().map((show) => (
-              <option key={show || "__blank__"} value={show}>
-                {show || "No show"}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button
-          onClick={applyShowToAllImportRows}
-          className="cursor-pointer rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50"
-        >
-          Apply to All
-        </button>
-        <label className="w-56">
-          <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-            Sales Rep
-          </span>
-          <select
-            value={bulkImportSalesRep}
-            onChange={(e) => setBulkImportSalesRep(e.target.value)}
-            className={`${importCellInputClass} mt-1`}
+            Apply to All
+          </button>
+          <label className="w-56">
+            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Sales Rep
+            </span>
+            <select
+              value={
+                showImportNewRepInput ? IMPORT_ADD_NEW_REP : bulkImportSalesRep
+              }
+              onChange={(e) => {
+                if (e.target.value === IMPORT_ADD_NEW_REP) {
+                  setShowImportNewRepInput(true);
+                  setImportNewRepDraft("");
+                  return;
+                }
+                setShowImportNewRepInput(false);
+                setBulkImportSalesRep(e.target.value);
+              }}
+              className={`${importCellInputClass} mt-1`}
+            >
+              <option value="">Select rep...</option>
+              {getImportSalesRepOptions().map((rep) => (
+                <option key={rep} value={rep}>
+                  {rep}
+                </option>
+              ))}
+              <option value={IMPORT_ADD_NEW_REP}>+ Add New Sales Rep</option>
+            </select>
+          </label>
+          <button
+            onClick={applySalesRepToAllImportRows}
+            disabled={!bulkImportSalesRep || showImportNewRepInput}
+            className="cursor-pointer rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <option value="">Select rep...</option>
-            {getImportSalesRepOptions().map((rep) => (
-              <option key={rep} value={rep}>
-                {rep}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button
-          onClick={applySalesRepToAllImportRows}
-          className="cursor-pointer rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50"
-        >
-          Apply to All
-        </button>
+            Apply to All
+          </button>
+        </div>
+
+        {showImportNewShowInput && (
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={importNewShowDraft}
+              onChange={(e) => setImportNewShowDraft(e.target.value)}
+              placeholder="Enter new show name"
+              className={`${importCellInputClass} w-56`}
+            />
+            <button
+              type="button"
+              onClick={confirmImportNewShow}
+              className="cursor-pointer rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-xs font-medium text-green-700 hover:bg-green-100"
+            >
+              Add Show
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowImportNewShowInput(false);
+                setImportNewShowDraft("");
+              }}
+              className="cursor-pointer rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+
+        {showImportNewRepInput && (
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={importNewRepDraft}
+              onChange={(e) => setImportNewRepDraft(e.target.value)}
+              placeholder="Enter new sales rep name"
+              className={`${importCellInputClass} w-56`}
+            />
+            <button
+              type="button"
+              onClick={confirmImportNewRep}
+              className="cursor-pointer rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-xs font-medium text-green-700 hover:bg-green-100"
+            >
+              Add Rep
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowImportNewRepInput(false);
+                setImportNewRepDraft("");
+              }}
+              className="cursor-pointer rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="mt-4 max-h-[360px] overflow-y-auto overflow-x-hidden rounded-2xl border border-gray-200">
@@ -4437,12 +4764,8 @@ setCompanyList((prev) =>
       <div className="mt-6 flex items-center justify-end gap-3">
         <button
           onClick={() => {
-            setImportPreviewOpen(false);
-            setPendingImportRows([]);
-            setPendingImportFileName("");
             setPendingDuplicateImport(null);
-            setBulkImportSalesRep("");
-            setBulkImportShow("");
+            resetImportPreviewState();
           }}
           className="cursor-pointer rounded-2xl border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
         >

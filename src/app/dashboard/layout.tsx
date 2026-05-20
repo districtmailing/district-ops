@@ -20,6 +20,7 @@ type NavItemProps = {
   icon: React.ReactNode;
   collapsed: boolean;
   matchPaths?: string[];
+  matchPrefix?: string;
 };
 
 function NavItem({
@@ -28,13 +29,17 @@ function NavItem({
   icon,
   collapsed,
   matchPaths = [],
+  matchPrefix,
 }: NavItemProps) {
   const pathname = usePathname();
   const [hovered, setHovered] = useState(false);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
   
 
-  const isActive = pathname === href || matchPaths.includes(pathname);
+  const isActive =
+    pathname === href ||
+    matchPaths.includes(pathname) ||
+    Boolean(matchPrefix && pathname.startsWith(matchPrefix));
 
   
 
@@ -217,6 +222,26 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem("dashboard-sidebar-collapsed");
+      if (stored === "true") setCollapsed(true);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "dashboard-sidebar-collapsed",
+        collapsed ? "true" : "false"
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [collapsed]);
   const [user, setUser] = useState<any>(null);
 
 useEffect(() => {
@@ -388,6 +413,7 @@ const filteredItems = useMemo(() => {
                   href="/dashboard/purchase-order"
                   label="Purchase Orders"
                   collapsed={collapsed}
+                  matchPrefix="/dashboard/purchase-order"
                   icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>}
                 />
               </div>

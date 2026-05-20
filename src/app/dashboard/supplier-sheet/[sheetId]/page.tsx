@@ -4,13 +4,26 @@ import Link from "next/link";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import {
+  buildPoConnectionsFromLineItems,
   createPurchaseOrder,
-  createPurchaseOrderLineItem,
+  upsertPurchaseOrderLineItem,
+  getPoItemsForMatch,
+  getLineItemUnits,
   listPurchaseOrderLineItemsForSheet,
+  syncLineItemQuantityFields,
   listPurchaseOrders,
+  formatSupabaseErrorMessage,
   parseNumber,
   PurchaseOrder,
+  type PurchaseOrderLineItem,
 } from "@/lib/purchaseOrders";
+import { buildDefaultPoName } from "@/lib/poNaming";
+import { RowPoStatus } from "@/components/purchase-order/RowPoStatus";
+import { PoStagePill } from "@/components/purchase-order/PoStagePill";
+import {
+  listSupplierSheetRowNotes,
+  upsertSupplierSheetRowNote,
+} from "@/lib/supplierSheetNotes";
 
 type AmazonMatch = {
   asin: string;
@@ -186,40 +199,6 @@ function CopyPill({
   );
 }
 
-function formatPoDateMmDdYy(d = new Date()) {
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  const yy = String(d.getFullYear()).slice(-2);
-  return `${mm}${dd}${yy}`;
-}
-
-function deriveSupplierPoPrefix(supplier: string, sheetName: string): string {
-  const primary = supplier.trim() || sheetName.trim();
-  if (!primary) return "SUPP";
-
-  const words = primary.split(/[\s\-_&]+/).filter(Boolean);
-  const letters = (s: string) => s.replace(/[^a-zA-Z]/g, "");
-
-  if (words.length >= 2) {
-    const initials = words
-      .map((w) => letters(w)[0] || "")
-      .join("")
-      .toUpperCase();
-    if (initials.length >= 3) return initials.slice(0, 5);
-  }
-
-  const alpha = primary.replace(/[^a-zA-Z]/g, "").toUpperCase();
-  if (alpha.length >= 4) return alpha.slice(0, 4);
-  if (alpha.length > 0) return alpha;
-
-  const alnum = primary.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
-  return alnum.slice(0, 4) || "SUPP";
-}
-
-function buildDefaultPoName(supplier: string, sheetName: string) {
-  return `${deriveSupplierPoPrefix(supplier, sheetName)}${formatPoDateMmDdYy()}`;
-}
-
 function qaParseMoney(raw: string): number | null {
   const t = raw.replace(/[$,%\s]/g, "").trim();
   if (!t) return null;
@@ -235,6 +214,105 @@ function qaFormatMoney(n: number | null, digits = 2): string {
 function qaFormatPct(n: number | null, digits = 2): string {
   if (n === null || !Number.isFinite(n)) return "—";
   return `${n.toFixed(digits)}%`;
+}
+
+function formatHistoryQty(n: number | null | undefined) {
+  if (n == null || !Number.isFinite(n)) return "—";
+  return String(n);
+}
+
+function formatHistoryCost(n: number | null | undefined) {
+  if (n == null || !Number.isFinite(n)) return "—";
+  return `$${n.toFixed(2)}`;
+}
+
+function formatHistoryDate(iso: string) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  } catch {
+    return "—";
+  }
+}
+
+function sumHistoryQty(values: (number | null | undefined)[]): number | null {
+  let sum = 0;
+  let hasValue = false;
+  for (const value of values) {
+    if (value == null || !Number.isFinite(value)) continue;
+    sum += value;
+    hasValue = true;
+  }
+  return hasValue ? sum : null;
+}
+
+type ItemPurchaseHistoryRow = {
+  lineItem: PurchaseOrderLineItem;
+  po?: PurchaseOrder;
+  receivedAt: string | null;
+};
+
+function aggregatePurchaseHistoryByPo(
+  rows: { lineItem: PurchaseOrderLineItem; po?: PurchaseOrder }[]
+): ItemPurchaseHistoryRow[] {
+  const groups = new Map<string, { lineItem: PurchaseOrderLineItem; po?: PurchaseOrder }[]>();
+
+  for (const row of rows) {
+    const key = String(row.lineItem.poId);
+    const existing = groups.get(key) ?? [];
+    existing.push(row);
+    groups.set(key, existing);
+  }
+
+  const aggregated: ItemPurchaseHistoryRow[] = [];
+
+  for (const items of groups.values()) {
+    const sorted = [...items].sort(
+      (a, b) =>
+        new Date(b.lineItem.createdAt).getTime() - new Date(a.lineItem.createdAt).getTime()
+    );
+    const latest = sorted[0];
+    const lineItems = sorted.map((entry) => entry.lineItem);
+    const receivedSource = [...lineItems]
+      .filter(
+        (item) =>
+          item.receivedUnits != null &&
+          Number.isFinite(item.receivedUnits) &&
+          item.receivedUnits > 0
+      )
+      .sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      )[0];
+
+    const totalUnits =
+      sumHistoryQty(lineItems.map((item) => getLineItemUnits(item))) ??
+      sumHistoryQty(lineItems.map((item) => item.units));
+
+    aggregated.push({
+      po: latest.po,
+      receivedAt: receivedSource?.createdAt ?? null,
+      lineItem: syncLineItemQuantityFields(
+        {
+          ...latest.lineItem,
+          receivedUnits: sumHistoryQty(lineItems.map((item) => item.receivedUnits)),
+          wantEachCost: latest.lineItem.wantEachCost,
+          needEachCost: latest.lineItem.needEachCost,
+          eachCost: latest.lineItem.eachCost,
+          createdAt: latest.lineItem.createdAt,
+        },
+        totalUnits
+      ),
+    });
+  }
+
+  return aggregated.sort(
+    (a, b) =>
+      new Date(b.lineItem.createdAt).getTime() - new Date(a.lineItem.createdAt).getTime()
+  );
 }
 
 function qaCalcPmr(
@@ -314,10 +392,16 @@ export default function SupplierSheetDetailPage() {
 const renameTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const [notesByRow, setNotesByRow] = useState<Record<string, string>>({});
+  const [notesModalRowId, setNotesModalRowId] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
 
   const [itemDetailsModalRowId, setItemDetailsModalRowId] = useState<string | null>(
     null
   );
+  const [itemDetailsModalTab, setItemDetailsModalTab] = useState<
+    "quick-add" | "purchase-history" | "ss-history"
+  >("quick-add");
   const [itemModalSelectedPo, setItemModalSelectedPo] = useState("");
   const [quickWantCase, setQuickWantCase] = useState("");
   const [quickWantEach, setQuickWantEach] = useState("");
@@ -333,6 +417,7 @@ const renameTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [createPoModalOpen, setCreatePoModalOpen] = useState(false);
   const [newPoName, setNewPoName] = useState("");
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [sheetPoLineItems, setSheetPoLineItems] = useState<PurchaseOrderLineItem[]>([]);
   const [addedPoRowIds, setAddedPoRowIds] = useState<Set<string>>(new Set());
   const [savingPoItem, setSavingPoItem] = useState(false);
   const [listPage, setListPage] = useState(1);
@@ -435,7 +520,7 @@ const renameTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   }, [quickSellEach, quickNeedEachDerived, quickNeedDisc]);
 
   useEffect(() => {
-    if (itemDetailsModalRowId) setItemModalSelectedPo("");
+    if (itemDetailsModalRowId) setItemDetailsModalTab("quick-add");
   }, [itemDetailsModalRowId]);
 
   function normalizeNumericString(value: unknown) {
@@ -469,17 +554,19 @@ const renameTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     updateCasesFromUnits(poUnits, next);
   }
 
-  function handleAsinAmountChange(value: string) {
-    const next = normalizeNumericString(value);
-    setPoAsinAmount(next);
+  function setLinkedUnits(unitsValue: string) {
+    const next = normalizeNumericString(unitsValue);
     setPoUnits(next);
+    setPoAsinAmount(next);
     updateCasesFromUnits(next);
   }
 
+  function handleAsinAmountChange(value: string) {
+    setLinkedUnits(value);
+  }
+
   function handleUnitsChange(value: string) {
-    const next = normalizeNumericString(value);
-    setPoUnits(next);
-    updateCasesFromUnits(next);
+    setLinkedUnits(value);
   }
 
   function handleCasesChange(value: string) {
@@ -488,12 +575,11 @@ const renameTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     setPoCases(next);
     if (!Number.isFinite(caseSize) || caseSize <= 0) {
       setPoUnits("");
+      setPoAsinAmount("");
       setPoLeftOver("");
       return;
     }
-    const nextUnits = String((Number(next) || 0) * caseSize);
-    setPoUnits(nextUnits);
-    setPoLeftOver("0");
+    setLinkedUnits(String((Number(next) || 0) * caseSize));
   }
 
   const loadPurchaseOrders = async () => {
@@ -503,6 +589,7 @@ const renameTimeoutRef = useRef<NodeJS.Timeout | null>(null);
         listPurchaseOrderLineItemsForSheet(sheetId),
       ]);
       setPurchaseOrders(orders);
+      setSheetPoLineItems(lineItems);
       setAddedPoRowIds(new Set(lineItems.map((item) => item.supplierRowId).filter(Boolean)));
     } catch (error) {
       console.error("Error loading purchase orders:", {
@@ -519,9 +606,47 @@ const renameTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     }
   };
 
+  const mergeSavedLineItem = (
+    saved: PurchaseOrderLineItem,
+    row: UploadedSheetRow
+  ): PurchaseOrderLineItem => ({
+    ...saved,
+    supplierSheetId: saved.supplierSheetId || sheetId,
+    supplierRowId: saved.supplierRowId || row.id,
+    asin: saved.asin || row.amazonMatch?.asin || "",
+    upc: saved.upc || row.upc || "",
+  });
+
   useEffect(() => {
     loadPurchaseOrders();
-  }, []);
+  }, [sheetId]);
+
+  const loadRowNotes = async () => {
+    try {
+      const notes = await listSupplierSheetRowNotes(sheetId);
+      const map: Record<string, string> = {};
+      notes.forEach((entry) => {
+        if (entry.supplierRowId) map[entry.supplierRowId] = entry.note;
+      });
+      setNotesByRow(map);
+    } catch (error) {
+      console.warn("Could not load row notes from Supabase:", error);
+    }
+  };
+
+  useEffect(() => {
+    loadRowNotes();
+  }, [sheetId]);
+
+  useEffect(() => {
+    if (!itemDetailsModalRowId || purchaseOrders.length === 0) return;
+    const sorted = [...purchaseOrders].sort((a, b) => {
+      const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
+      const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
+      return bTime - aTime;
+    });
+    setItemModalSelectedPo(sorted[0]?.id || "");
+  }, [itemDetailsModalRowId, purchaseOrders]);
 
   useEffect(() => {
     if (!createPoModalOpen || !sheet) return;
@@ -545,9 +670,9 @@ const renameTimeoutRef = useRef<NodeJS.Timeout | null>(null);
       const needEachCost = quickNeedEachDerived ?? parseNumber(itemDetailRow.amazonMatch?.asinCost || "");
       const needCaseCost = parseNumber(quickNeedCase);
 
-      const savedItem = await createPurchaseOrderLineItem({
+      const { item: savedItem, created: poLineCreated } = await upsertPurchaseOrderLineItem({
         poId: itemModalSelectedPo,
-        supplierSheetId: sheet.id,
+        supplierSheetId: sheetId,
         supplierRowId: itemDetailRow.id,
         asin: itemDetailRow.amazonMatch?.asin || "",
         upc: itemDetailRow.upc,
@@ -580,14 +705,30 @@ const renameTimeoutRef = useRef<NodeJS.Timeout | null>(null);
         needPm: quickNeedMetrics.pm,
       });
 
-      setAddedPoRowIds((prev) => new Set(prev).add(savedItem.supplierRowId));
-      setToast("Item added to PO");
+      const normalizedSaved = mergeSavedLineItem(savedItem, itemDetailRow);
+      console.log("[ADD TO PO SAVED]", normalizedSaved);
+
+      setSheetPoLineItems((prev) => [
+        normalizedSaved,
+        ...prev.filter((item) => item.id !== normalizedSaved.id),
+      ]);
+      setAddedPoRowIds((prev) => new Set(prev).add(String(normalizedSaved.supplierRowId)));
+
+      try {
+        await loadPurchaseOrders();
+      } catch (reloadError) {
+        console.warn("[ADD TO PO] reload failed; keeping optimistic line item", reloadError);
+      }
+
+      setToast(
+        poLineCreated ? "Item added to PO" : "Updated PO item quantity."
+      );
       setItemDetailsModalRowId(null);
       window.setTimeout(() => setToast(""), 2200);
     } catch (error) {
-      console.error("Error adding item to PO:", error);
-      setToast("Could not add item to PO.");
-      window.setTimeout(() => setToast(""), 2600);
+      console.warn("Error adding item to PO:", error);
+      setToast(formatSupabaseErrorMessage(error));
+      window.setTimeout(() => setToast(""), 4200);
     } finally {
       setSavingPoItem(false);
     }
@@ -616,15 +757,9 @@ const renameTimeoutRef = useRef<NodeJS.Timeout | null>(null);
       setToast(`PO “${createdPo.name}” created.`);
       window.setTimeout(() => setToast(""), 2400);
     } catch (error) {
-      console.error("Error creating PO:", {
-        message: error && typeof error === "object" && "message" in error ? error.message : undefined,
-        code: error && typeof error === "object" && "code" in error ? error.code : undefined,
-        details: error && typeof error === "object" && "details" in error ? error.details : undefined,
-        hint: error && typeof error === "object" && "hint" in error ? error.hint : undefined,
-        error,
-      });
-      setToast("Could not create PO.");
-      window.setTimeout(() => setToast(""), 2600);
+      console.warn("Error creating PO:", error);
+      setToast(formatSupabaseErrorMessage(error));
+      window.setTimeout(() => setToast(""), 4200);
     }
   };
 
@@ -806,6 +941,58 @@ const updateAmazonMatchField = (
   useEffect(() => {
     if (listPage > listTotalPages) setListPage(listTotalPages);
   }, [listPage, listTotalPages]);
+
+  const getMatchedPoItemsForRow = (row: UploadedSheetRow) =>
+    getPoItemsForMatch(sheetId, row, row.amazonMatch, sheetPoLineItems);
+
+  const getRowPoConnectionsForRow = (row: UploadedSheetRow) => {
+    const matchedPoItems = getMatchedPoItemsForRow(row);
+    return buildPoConnectionsFromLineItems(matchedPoItems, purchaseOrders);
+  };
+
+  const notesModalRow = useMemo(() => {
+    if (!sheet || !notesModalRowId) return null;
+    return sheet.uploadedRows.find((r) => r.id === notesModalRowId) ?? null;
+  }, [sheet, notesModalRowId]);
+
+  const handleSaveRowNote = async () => {
+    if (!notesModalRow) return;
+    setSavingNote(true);
+    try {
+      await upsertSupplierSheetRowNote({
+        supplierSheetId: sheetId,
+        supplierRowId: notesModalRow.id,
+        asin: notesModalRow.amazonMatch?.asin,
+        note: noteDraft.trim(),
+      });
+      setNotesByRow((prev) => ({ ...prev, [notesModalRow.id]: noteDraft.trim() }));
+      setNotesModalRowId(null);
+      setToast("Note saved.");
+      window.setTimeout(() => setToast(""), 2000);
+    } catch (error) {
+      console.error("Error saving row note:", error);
+      setToast("Could not save note.");
+      window.setTimeout(() => setToast(""), 2600);
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
+  const itemPurchaseHistoryRows = useMemo(() => {
+    if (!itemDetailRow) return [];
+    const matched = getPoItemsForMatch(
+      sheetId,
+      itemDetailRow,
+      itemDetailRow.amazonMatch,
+      sheetPoLineItems
+    );
+    const poById = new Map(purchaseOrders.map((po) => [po.id, po]));
+    const rawRows = matched.map((lineItem) => ({
+      lineItem,
+      po: poById.get(lineItem.poId),
+    }));
+    return aggregatePurchaseHistoryByPo(rawRows);
+  }, [itemDetailRow, sheetPoLineItems, purchaseOrders, sheetId]);
 
   const matchedCount = sheet?.uploadedRows.filter((row) => !!row.amazonMatch).length || 0;
   const notMatchedCount =
@@ -1528,7 +1715,7 @@ const updateAmazonMatchField = (
 
          {/* AMAZON MATCH ROW */}
 <div
-  className="relative z-0 grid bg-[#f8faf7]"
+  className="relative z-0 grid overflow-visible bg-[#f8faf7]"
   style={{
     gridTemplateColumns: sheetColumns,
     boxShadow: "inset 0 -3px 0 #f59e0b",
@@ -1635,11 +1822,22 @@ const updateAmazonMatchField = (
         {row.amazonMatch?.fbaQty ?? 0}
       </span>
 
-      <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 shrink-0 text-[#111827]">
-        <circle cx="12" cy="12" r="10" fill="currentColor" />
-        <rect x="11" y="10" width="2" height="6" rx="1" fill="white" />
-        <circle cx="12" cy="7" r="1.5" fill="white" />
-      </svg>
+      <button
+        type="button"
+        title={notesByRow[row.id]?.trim() ? "Edit note" : "Add note"}
+        onClick={() => {
+          setNotesModalRowId(row.id);
+          setNoteDraft(notesByRow[row.id] || "");
+        }}
+        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition hover:bg-white ${
+          notesByRow[row.id]?.trim() ? "text-[#2563eb]" : "text-[#94a3b8]"
+        }`}
+      >
+        <svg viewBox="0 0 24 24" fill="none" className="h-3.5 w-3.5" stroke="currentColor" strokeWidth="2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Z" strokeLinejoin="round" />
+          <path d="M14 2v6h6M8 13h8M8 17h6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
     </div>
   </div>
 </div>
@@ -1815,29 +2013,44 @@ const updateAmazonMatchField = (
 
 
 {/* COLUMN 4 — INFO */}
-<div className="border-l border-[#d7dde7] px-2.5 py-2">
-  <div className="flex h-[128px] min-h-[128px] w-full items-start justify-start gap-2 pl-0.5 pt-0.5">
-    <button
-      type="button"
-      title="View Product"
-      className="shrink-0 rounded-lg p-1.5 text-[#2563eb] transition hover:bg-blue-50/90 hover:text-[#1d4ed8]"
-    >
-      <svg viewBox="0 0 24 24" fill="none" className="h-7 w-7" stroke="currentColor" strokeWidth="1.75">
-        <path d="M6 8h12l-1 12H7L6 8Z" strokeLinejoin="round" />
-        <path d="M9 8V6a3 3 0 0 1 6 0v2" strokeLinecap="round" />
-      </svg>
-    </button>
+<div className="overflow-visible border-l border-[#d7dde7] px-2.5 py-2">
+  <div className="flex h-[128px] min-h-[128px] w-full flex-col items-center justify-center gap-1.5 overflow-visible">
+    <div className="flex shrink-0 items-start justify-start gap-2 pl-0.5 pt-0.5">
+      <button
+        type="button"
+        title="View Product"
+        className="shrink-0 rounded-lg p-1.5 text-[#2563eb] transition hover:bg-blue-50/90 hover:text-[#1d4ed8]"
+      >
+        <svg viewBox="0 0 24 24" fill="none" className="h-7 w-7" stroke="currentColor" strokeWidth="1.75">
+          <path d="M6 8h12l-1 12H7L6 8Z" strokeLinejoin="round" />
+          <path d="M9 8V6a3 3 0 0 1 6 0v2" strokeLinecap="round" />
+        </svg>
+      </button>
 
-    <button
-      type="button"
-      title="View Pricing"
-      className="shrink-0 rounded-lg p-1.5 text-[#2563eb] transition hover:bg-blue-50/90 hover:text-[#1d4ed8]"
-    >
-      <svg viewBox="0 0 24 24" fill="none" className="h-7 w-7" stroke="currentColor" strokeWidth="1.75">
-        <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L4 13.83V4h9.83l6.76 6.76a2 2 0 0 1 0 2.83Z" strokeLinejoin="round" />
-        <circle cx="7.5" cy="7.5" r="1.5" fill="currentColor" />
-      </svg>
-    </button>
+      <button
+        type="button"
+        title="View Pricing"
+        className="shrink-0 rounded-lg p-1.5 text-[#2563eb] transition hover:bg-blue-50/90 hover:text-[#1d4ed8]"
+      >
+        <svg viewBox="0 0 24 24" fill="none" className="h-7 w-7" stroke="currentColor" strokeWidth="1.75">
+          <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L4 13.83V4h9.83l6.76 6.76a2 2 0 0 1 0 2.83Z" strokeLinejoin="round" />
+          <circle cx="7.5" cy="7.5" r="1.5" fill="currentColor" />
+        </svg>
+      </button>
+    </div>
+
+    {(() => {
+      const matchedPoItems = getMatchedPoItemsForRow(row);
+      const connections = buildPoConnectionsFromLineItems(matchedPoItems, purchaseOrders);
+
+      if (connections.length === 0) return null;
+
+      return (
+        <div className="w-full min-w-0">
+          <RowPoStatus connections={connections} className="w-full" />
+        </div>
+      );
+    })()}
   </div>
 </div>
 
@@ -1926,11 +2139,11 @@ const updateAmazonMatchField = (
   onClick={() => setItemDetailsModalRowId(row.id)}
   className="flex h-9 min-h-0 shrink-0 flex-nowrap cursor-pointer items-center justify-center gap-1 overflow-hidden whitespace-nowrap rounded-2xl px-2 py-1 text-[12px] font-semibold leading-none text-white shadow-sm"
   style={{
-    backgroundColor: addedPoRowIds.has(row.id) ? "#15803d" : "#43586a",
-    boxShadow: `inset 0 0 0 9999px ${addedPoRowIds.has(row.id) ? "#15803d" : "#43586a"}`,
+    backgroundColor: "#43586a",
+    boxShadow: "inset 0 0 0 9999px #43586a",
   }}
 >
-  <span className="shrink-0">{addedPoRowIds.has(row.id) ? "ON PO" : "ADD TO PO"}</span>
+  <span className="shrink-0">ADD TO PO</span>
   <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 shrink-0">
     <path
       d="M9 6l6 6-6 6"
@@ -2039,7 +2252,7 @@ const updateAmazonMatchField = (
           <div
             role="dialog"
             aria-labelledby="supplier-item-details-title"
-            className="flex max-h-[88vh] w-[min(90vw,960px)] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-[0_12px_40px_-8px_rgba(15,23,42,0.15)]"
+            className="flex h-[min(88vh,704px)] w-[min(90vw,960px)] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-[0_12px_40px_-8px_rgba(15,23,42,0.15)]"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-3 py-2.5">
@@ -2060,32 +2273,127 @@ const updateAmazonMatchField = (
             </div>
 
             <div className="flex shrink-0 items-end gap-0 border-b border-gray-200 bg-[#f8fafc] px-2">
-              <div className="relative flex items-center">
-                <span className="px-2.5 pb-2 pt-2 text-[11px] font-semibold uppercase tracking-wide text-[#2563eb]">
-                  QUICK ADD
-                </span>
-                <span
-                  className="absolute bottom-0 left-2 right-2 h-0.5 rounded-full bg-[#2563eb]"
-                  aria-hidden
-                />
-              </div>
-              <button
-                type="button"
-                tabIndex={-1}
-                className="px-2.5 pb-2 pt-2 text-[11px] font-medium uppercase tracking-wide text-gray-500"
-              >
-                PURCHASE HISTORY
-              </button>
-              <button
-                type="button"
-                tabIndex={-1}
-                className="px-2.5 pb-2 pt-2 text-[11px] font-medium uppercase tracking-wide text-gray-500"
-              >
-                SS HISTORY
-              </button>
+              {(
+                [
+                  ["quick-add", "Quick Add"],
+                  ["purchase-history", "Purchase History"],
+                  ["ss-history", "SS History"],
+                ] as const
+              ).map(([tabId, label]) => {
+                const active = itemDetailsModalTab === tabId;
+                return (
+                  <button
+                    key={tabId}
+                    type="button"
+                    onClick={() => setItemDetailsModalTab(tabId)}
+                    className={`relative px-2.5 pb-2 pt-2 text-[11px] uppercase tracking-wide ${
+                      active
+                        ? "font-semibold text-[#2563eb]"
+                        : "font-medium text-gray-500 hover:text-gray-700"
+                    }`}
+                  >
+                    {label}
+                    {active && (
+                      <span
+                        className="absolute bottom-0 left-2 right-2 h-0.5 rounded-full bg-[#2563eb]"
+                        aria-hidden
+                      />
+                    )}
+                  </button>
+                );
+              })}
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto bg-[#f8fafc]/80 p-2.5 sm:p-3">
+            <div className="h-[548px] shrink-0 overflow-y-auto bg-[#f8fafc]/80 p-2.5 sm:p-3">
+              <div className="h-full min-h-[548px]">
+              {itemDetailsModalTab === "purchase-history" ? (
+                <div className="flex h-full min-h-[548px] flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+                  {itemPurchaseHistoryRows.length === 0 ? (
+                    <p className="flex h-full items-center justify-center px-4 text-center text-[13px] font-medium text-gray-500">
+                      No Record Found
+                    </p>
+                  ) : (
+                    <table className="w-full table-fixed border-collapse text-[11px]">
+                      <thead>
+                        <tr className="border-b border-gray-200 bg-[#fafafa] text-left text-[10px] font-semibold uppercase tracking-wide text-gray-600">
+                          <th className="w-[9%] px-1 py-2">Created</th>
+                          <th className="w-[14%] px-1 py-2">PO</th>
+                          <th className="w-[8%] px-1 py-2">Want</th>
+                          <th className="w-[8%] px-1 py-2">Need</th>
+                          <th className="w-[8%] px-1 py-2">Got</th>
+                          <th className="w-[6%] px-1 py-2">Units</th>
+                          <th className="w-[7%] px-1 py-2">ASIN</th>
+                          <th className="w-[8%] px-1 py-2">Rcvd</th>
+                          <th className="w-[9%] px-1 py-2">Rcvd Dt</th>
+                          <th className="w-[7%] px-1 py-2">Prod</th>
+                          <th className="w-[14%] px-1 py-2">Stage</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {itemPurchaseHistoryRows.map(({ lineItem, po, receivedAt }) => {
+                          const displayUnits = getLineItemUnits(lineItem);
+                          const receivedUnits = lineItem.receivedUnits;
+                          const hasReceived =
+                            receivedUnits != null &&
+                            Number.isFinite(receivedUnits) &&
+                            receivedUnits > 0;
+                          return (
+                            <tr
+                              key={lineItem.poId}
+                              className="border-b border-gray-100 last:border-b-0 hover:bg-[#f8fafc]"
+                            >
+                              <td className="truncate px-1 py-2 tabular-nums text-[#334155] text-gray-700">
+                                {formatHistoryDate(lineItem.createdAt)}
+                              </td>
+                              <td className="truncate px-1 py-2 font-semibold text-[#111827]" title={po?.name || lineItem.poId}>
+                                {po?.name || lineItem.poId}
+                              </td>
+                              <td className="truncate px-1 py-2 tabular-nums text-[#334155]">
+                                {formatHistoryCost(lineItem.wantEachCost)}
+                              </td>
+                              <td className="truncate px-1 py-2 tabular-nums text-[#334155]">
+                                {formatHistoryCost(lineItem.needEachCost)}
+                              </td>
+                              <td className="truncate px-1 py-2 tabular-nums text-[#334155]">
+                                {formatHistoryCost(lineItem.eachCost)}
+                              </td>
+                              <td className="truncate px-1 py-2 tabular-nums text-[#334155]">
+                                {formatHistoryQty(displayUnits)}
+                              </td>
+                              <td className="truncate px-1 py-2 tabular-nums text-[#334155]">
+                                {formatHistoryQty(displayUnits)}
+                              </td>
+                              <td className="truncate px-1 py-2 tabular-nums text-[#334155]">
+                                {formatHistoryQty(receivedUnits)}
+                              </td>
+                              <td className="truncate px-1 py-2 tabular-nums text-[#334155] text-gray-700">
+                                {hasReceived && receivedAt
+                                  ? formatHistoryDate(receivedAt)
+                                  : "—"}
+                              </td>
+                              <td className="truncate px-1 py-2 tabular-nums text-[#334155]">
+                                {formatHistoryQty(displayUnits)}
+                              </td>
+                              <td className="px-1 py-2">
+                                {po?.stage ? (
+                                  <PoStagePill stage={po.stage} />
+                                ) : (
+                                  <span className="text-gray-400">—</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              ) : itemDetailsModalTab === "ss-history" ? (
+                <p className="flex h-full min-h-[548px] items-center justify-center rounded-lg border border-gray-200 bg-white px-4 text-center text-[13px] font-medium text-gray-500 shadow-sm">
+                  No Record Found
+                </p>
+              ) : (
+              <div className="flex h-full min-h-[548px] flex-col">
               <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
                 <div className="flex flex-wrap items-center gap-1 border-b border-gray-200 bg-white px-2 py-1.5">
                   <span className="max-w-[140px] truncate rounded bg-[#fde68a] px-2 py-0.5 font-mono text-[11px] font-bold text-[#78350f]">
@@ -2410,6 +2718,9 @@ const updateAmazonMatchField = (
                   </div>
                 </div>
               </div>
+              </div>
+              )}
+              </div>
             </div>
           </div>
         </div>
@@ -2463,6 +2774,53 @@ const updateAmazonMatchField = (
                 className="rounded-xl bg-[#22c55e] px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#16a34a]"
               >
                 Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      
+      {notesModalRowId && notesModalRow && (
+        <div
+          role="presentation"
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/40 px-4"
+          onClick={() => setNotesModalRowId(null)}
+        >
+          <div
+            role="dialog"
+            aria-labelledby="row-note-title"
+            className="w-full max-w-sm rounded-xl border border-gray-200 bg-white p-4 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="row-note-title" className="text-sm font-semibold text-[#111827]">
+              Row Note
+            </h3>
+            <p className="mt-1 truncate text-[11px] text-gray-500">
+              {notesModalRow.amazonMatch?.asin || notesModalRow.upc || notesModalRow.id}
+            </p>
+            <textarea
+              value={noteDraft}
+              onChange={(e) => setNoteDraft(e.target.value)}
+              rows={4}
+              placeholder="Add a note for this item..."
+              className="mt-3 w-full resize-none rounded-lg border border-gray-300 px-3 py-2 text-sm text-[#111827] outline-none focus:border-[#2563eb]"
+            />
+            <div className="mt-3 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setNotesModalRowId(null)}
+                className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveRowNote}
+                disabled={savingNote}
+                className="rounded-lg bg-[#2563eb] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#1d4ed8] disabled:opacity-60"
+              >
+                {savingNote ? "Saving..." : "Save"}
               </button>
             </div>
           </div>

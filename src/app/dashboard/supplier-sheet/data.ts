@@ -7,7 +7,6 @@ export type UploadedSheet = {
   rows: number;
   notes?: string;
 };
-
 export const initialSheets: UploadedSheet[] = [
   {
     id: "resmed-april-2026",

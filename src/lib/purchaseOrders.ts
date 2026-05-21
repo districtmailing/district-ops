@@ -118,8 +118,21 @@ export function logSupabaseWarning(label: string, error: unknown) {
 
 export function logSupabaseError(label: string, error: unknown) {
   const typedError = (error || {}) as SupabaseLikeError;
+  const serialized =
+    typedError.message ||
+    typedError.details ||
+    typedError.hint ||
+    (() => {
+      try {
+        const json = JSON.stringify(error);
+        return json && json !== "{}" ? json : "";
+      } catch {
+        return "";
+      }
+    })();
+
   console.error(label, {
-    message: typedError.message || "Supabase request failed.",
+    message: serialized || "Supabase request failed.",
     code: typedError.code,
     details: typedError.details,
     hint: typedError.hint,

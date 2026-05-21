@@ -24,6 +24,12 @@ import {
   listSupplierSheetRowNotes,
   upsertSupplierSheetRowNote,
 } from "@/lib/supplierSheetNotes";
+import {
+  getSupplierSheetWithRows,
+  updateSupplierSheetName,
+  updateSupplierSheetRow,
+  type SupplierSheetDetail,
+} from "@/lib/supplierSheets";
 
 type AmazonMatch = {
   asin: string;
@@ -77,53 +83,36 @@ type UploadedSheet = {
   uploadedRows: UploadedSheetRow[];
 };
 
-const fallbackSheets: UploadedSheet[] = [
-  {
-    id: "1",
-    sheetName: "ResMed - Tony (1)",
-    supplier: "ResMed",
-    status: "Uploaded",
-    rows: 10,
-    bad: 0,
-    upcs: 10,
-    noAsin: 8,
-    asins: 2,
-    buyer: "Dalin",
-    progress: 100,
-    date: "04/13/26",
-    uploadedRows: [
-      {
-        id: "r1",
-        upc: "619498388103",
-        title: "HumidX 6pk Standard for AirMini",
-        supplierSku: "38013",
-        brand: "ResMed",
-        cost: "18.50",
-        quantity: "24",
-        casePack: "6",
-        amazonMatch: {
-          asin: "B08TEST123",
-          title: "ResMed HumidX Standard for AirMini - 6 Pack",
-          image: "https://via.placeholder.com/120x120?text=ASIN",
-          fbaQty: 14,
-          eligible: true,
-          note: "Good match based on UPC and title.",
-        },
-      },
-      {
-        id: "r2",
-        upc: "619498380100",
-        title: "AirMini Setup Pack",
-        supplierSku: "38010",
-        brand: "ResMed",
-        cost: "24.75",
-        quantity: "12",
-        casePack: "4",
-        amazonMatch: null,
-      },
-    ],
-  },
-];
+function detailToUploadedSheet(detail: SupplierSheetDetail): UploadedSheet {
+  return {
+    id: detail.id,
+    sheetName: detail.sheetName,
+    supplier: detail.supplier,
+    status: detail.status,
+    rows: detail.rows,
+    bad: detail.bad,
+    upcs: detail.upcs,
+    noAsin: detail.noAsin,
+    asins: detail.asins,
+    buyer: detail.buyer,
+    progress: detail.progress,
+    date: detail.date,
+    uploadedRows: detail.uploadedRows.map((row) => ({
+      id: row.id,
+      upc: row.upc,
+      title: row.title,
+      supplierSku: row.supplierSku,
+      brand: row.brand,
+      cost: row.cost,
+      quantity: row.quantity,
+      casePack: row.casePack,
+      amazonMatch: row.amazonMatch as AmazonMatch | null,
+      customInfo1: row.customInfo1,
+      customInfo2: row.customInfo2,
+      customInfo3: row.customInfo3,
+    })),
+  };
+}
 
 function StatCard({
   value,
@@ -379,8 +368,9 @@ export default function SupplierSheetDetailPage() {
   const params = useParams();
   const sheetId = String(params.sheetId);
 
-  const [sheets, setSheets] = useState<UploadedSheet[]>([]);
+  const [sheet, setSheet] = useState<UploadedSheet | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const rowPersistTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const [search, setSearch] = useState("");
   const [searchType, setSearchType] = useState("UPC");
@@ -439,26 +429,53 @@ const renameTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   }, []);
 
   useEffect(() => {
-    const savedSheets = window.localStorage.getItem("supplierSheets");
+    let cancelled = false;
 
-    if (savedSheets) {
+    const loadSheet = async () => {
+      setLoaded(false);
       try {
-        const parsed = JSON.parse(savedSheets) as UploadedSheet[];
-        setSheets(parsed);
-        setLoaded(true);
-        return;
+        const data = await getSupplierSheetWithRows(sheetId);
+        if (cancelled) return;
+        setSheet(data ? detailToUploadedSheet(data) : null);
       } catch (error) {
-        console.error("Failed to parse supplierSheets from localStorage", error);
+        console.error("Failed to load supplier sheet:", error);
+        if (!cancelled) setSheet(null);
+      } finally {
+        if (!cancelled) setLoaded(true);
       }
+    };
+
+    loadSheet();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sheetId]);
+
+  const scheduleRowPersist = (row: UploadedSheetRow) => {
+    if (rowPersistTimeoutsRef.current[row.id]) {
+      clearTimeout(rowPersistTimeoutsRef.current[row.id]);
     }
 
-    setSheets(fallbackSheets);
-    setLoaded(true);
-  }, []);
-
-  const sheet = useMemo(() => {
-    return sheets.find((item) => item.id === sheetId) || null;
-  }, [sheets, sheetId]);
+    rowPersistTimeoutsRef.current[row.id] = setTimeout(() => {
+      void updateSupplierSheetRow(sheetId, {
+        id: row.id,
+        upc: row.upc,
+        title: row.title,
+        supplierSku: row.supplierSku,
+        brand: row.brand,
+        cost: row.cost,
+        quantity: row.quantity,
+        casePack: row.casePack,
+        amazonMatch: row.amazonMatch,
+        customInfo1: row.customInfo1,
+        customInfo2: row.customInfo2,
+        customInfo3: row.customInfo3,
+      }).catch((error) => {
+        console.error("Failed to save row:", error);
+      });
+    }, 500);
+  };
 
   const itemDetailRow = useMemo(() => {
     if (!sheet || !itemDetailsModalRowId) return null;
@@ -785,86 +802,73 @@ const renameTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   };
 
   const updateSheetName = (nextName: string) => {
-  setEditableSheetName(nextName);
+    setEditableSheetName(nextName);
 
-  if (renameTimeoutRef.current) {
-    clearTimeout(renameTimeoutRef.current);
-  }
+    if (renameTimeoutRef.current) {
+      clearTimeout(renameTimeoutRef.current);
+    }
 
-  renameTimeoutRef.current = setTimeout(() => {
-    setSheets((prev) => {
-      const updated = prev.map((item) =>
-        item.id === sheetId
-          ? {
-              ...item,
-              sheetName: nextName.trim() || "Untitled Sheet",
-            }
-          : item
-      );
-
-      window.localStorage.setItem("supplierSheets", JSON.stringify(updated));
-      return updated;
-    });
-
-    setToast("Sheet name saved");
-    window.setTimeout(() => setToast(""), 1200);
-  }, 500);
-};
+    renameTimeoutRef.current = setTimeout(() => {
+      const trimmed = nextName.trim() || "Untitled Sheet";
+      setSheet((prev) => (prev ? { ...prev, sheetName: trimmed } : prev));
+      void updateSupplierSheetName(sheetId, trimmed)
+        .then(() => {
+          setToast("Sheet name saved");
+          window.setTimeout(() => setToast(""), 1200);
+        })
+        .catch((error) => {
+          console.error("Failed to save sheet name:", error);
+        });
+    }, 500);
+  };
 
   useEffect(() => {
   if (!sheet) return;
   setEditableSheetName(sheet.sheetName || "");
 }, [sheet]);
-const updateRowField = (
-  rowId: string,
-  field: keyof UploadedSheetRow,
-  value: string
-) => {
-  setSheets((prev) => {
-    const updated = prev.map((sheetItem) => {
-      if (sheetItem.id !== sheetId) return sheetItem;
+  const updateRowField = (
+    rowId: string,
+    field: keyof UploadedSheetRow,
+    value: string
+  ) => {
+    setSheet((prev) => {
+      if (!prev) return prev;
 
-      return {
-        ...sheetItem,
-        uploadedRows: sheetItem.uploadedRows.map((row) =>
-          row.id === rowId ? { ...row, [field]: value } : row
-        ),
-      };
+      const uploadedRows = prev.uploadedRows.map((row) =>
+        row.id === rowId ? { ...row, [field]: value } : row
+      );
+      const updatedRow = uploadedRows.find((row) => row.id === rowId);
+      if (updatedRow) scheduleRowPersist(updatedRow);
+
+      return { ...prev, uploadedRows };
     });
+  };
 
-    window.localStorage.setItem("supplierSheets", JSON.stringify(updated));
-    return updated;
-  });
-};
-const updateAmazonMatchField = (
-  rowId: string,
-  field: keyof AmazonMatch,
-  value: string
-) => {
-  setSheets((prev) => {
-    const updated = prev.map((sheetItem) => {
-      if (sheetItem.id !== sheetId) return sheetItem;
+  const updateAmazonMatchField = (
+    rowId: string,
+    field: keyof AmazonMatch,
+    value: string
+  ) => {
+    setSheet((prev) => {
+      if (!prev) return prev;
 
-      return {
-        ...sheetItem,
-        uploadedRows: sheetItem.uploadedRows.map((row) => {
-          if (row.id !== rowId || !row.amazonMatch) return row;
+      const uploadedRows = prev.uploadedRows.map((row) => {
+        if (row.id !== rowId || !row.amazonMatch) return row;
 
-          return {
-            ...row,
-            amazonMatch: {
-              ...row.amazonMatch,
-              [field]: value,
-            },
-          };
-        }),
-      };
+        return {
+          ...row,
+          amazonMatch: {
+            ...row.amazonMatch,
+            [field]: value,
+          },
+        };
+      });
+      const updatedRow = uploadedRows.find((row) => row.id === rowId);
+      if (updatedRow) scheduleRowPersist(updatedRow);
+
+      return { ...prev, uploadedRows };
     });
-
-    window.localStorage.setItem("supplierSheets", JSON.stringify(updated));
-    return updated;
-  });
-};
+  };
 
 
   const filteredRows = useMemo(() => {

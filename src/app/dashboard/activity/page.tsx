@@ -1,8 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { normalizeCompanyStatus } from "@/lib/companyStatus";
 import { needsFollowUp as companyNeedsFollowUp } from "@/lib/followUp";
 import { supabase } from "@/lib/supabase";
+import { resolveCallEmailRepName } from "@/lib/activityAttribution";
+import {
+  buildCurrentUserName,
+  getSalesRepOptions,
+  loadTeamMemberNamesForUser,
+} from "@/lib/teamMembers";
 
 type Company = {
   id: string;
@@ -31,7 +38,41 @@ type ActivityItem = {
   createdAt: string;
   dateLabel: string;
   timeLabel: string;
+  loggedByName: string;
 };
+
+function ActivityIcon({ type }: { type: string }) {
+  if (type === "Call") {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="h-4 w-4"
+      >
+        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.08 4.18 2 2 0 0 1 4.06 2h3a2 2 0 0 1 2 1.72c.12.9.33 1.77.63 2.61a2 2 0 0 1-.45 2.11L8 9.91a16 16 0 0 0 6.09 6.09l1.47-1.24a2 2 0 0 1 2.11-.45c.84.3 1.71.51 2.61.63A2 2 0 0 1 22 16.92Z" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-4 w-4"
+    >
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="m4 7 8 6 8-6" />
+    </svg>
+  );
+}
 
 function formatActivityDateTime(value: string) {
   const parsed = new Date(value);
@@ -68,7 +109,7 @@ function mapCompanyRow(row: any): Company {
     show: tradeShowName || "",
     rep: salesRepName || "",
     contact: row.contact_name || "",
-    status: statusName || "",
+    status: normalizeCompanyStatus(statusName || ""),
     email: row.email || "",
     phone: row.phone || "",
     website: row.website || "",
@@ -79,7 +120,11 @@ function mapCompanyRow(row: any): Company {
 }
 
 const TRADE_SHOW_OPTIONS = ["MedTrade", "Expo West", "ASD"];
-const REP_OPTIONS = ["William", "Evan", "Dalin", "Yana", "Jon", "Prince"];
+const HIDE_ACTIVITY_FEED_KEY = "activity-hide-feed";
+const HIDE_ACTION_ITEMS_KEY = "activity-hide-action-items";
+const sectionToggleButtonClass =
+  "shrink-0 cursor-pointer rounded-full border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50";
+
 type RangeFilter = "daily" | "weekly" | "monthly" | "quarterly" | "custom";
 
 export default function ActivityPage() {
@@ -97,6 +142,18 @@ const [rangeAnchorDate, setRangeAnchorDate] = useState(() => new Date());
   const [companyList, setCompanyList] = useState<Company[]>([]);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [teamMemberRepOptions, setTeamMemberRepOptions] = useState<string[]>([]);
+  const [currentUserName, setCurrentUserName] = useState("");
+  const [userDisplayNamesById, setUserDisplayNamesById] = useState<
+    Record<string, string>
+  >({});
+  const [hideActivityFeed, setHideActivityFeed] = useState(false);
+  const [hideActionItems, setHideActionItems] = useState(false);
+
+  const salesRepFilterOptions = useMemo(
+    () => getSalesRepOptions(teamMemberRepOptions, currentUserName),
+    [teamMemberRepOptions, currentUserName]
+  );
 
   const availableTradeShows = useMemo(() => {
     const showsFromCompanies = companyList.map((company) => company.show).filter(Boolean);
@@ -188,22 +245,32 @@ const [rangeAnchorDate, setRangeAnchorDate] = useState(() => new Date());
   }, [filteredCompanies]);
 
   const needsFollowUp = actionItems.length;
-  const totalYesCompanies = filteredCompanies.filter((company) => company.status === "YES").length;
-const totalWipCompanies = filteredCompanies.filter((company) => company.status === "WIP").length;
-const totalCallDoneCompanies = filteredCompanies.filter(
-  (company) => company.status === "Company call done"
-).length;
-const totalNoneCompanies = filteredCompanies.filter((company) => company.status === "None").length;
+  const totalYesCompanies = filteredCompanies.filter(
+    (company) => normalizeCompanyStatus(company.status) === "YES"
+  ).length;
+  const totalWipCompanies = filteredCompanies.filter(
+    (company) => normalizeCompanyStatus(company.status) === "WIP"
+  ).length;
+  const totalFollowUpCompanies = filteredCompanies.filter(
+    (company) => normalizeCompanyStatus(company.status) === "FOLLOW UP"
+  ).length;
+  const totalNewCompanies = filteredCompanies.filter(
+    (company) => normalizeCompanyStatus(company.status) === "NEW"
+  ).length;
+  const totalNoCompanies = filteredCompanies.filter(
+    (company) => normalizeCompanyStatus(company.status) === "NO"
+  ).length;
 
 const conversionRate =
   totalSuppliers > 0 ? Math.round((totalYesCompanies / totalSuppliers) * 100) : 0;
 
 const pipelineStatusData = [
   { label: "Suppliers", value: totalSuppliers },
-  { label: "Call Done", value: totalCallDoneCompanies },
+  { label: "NEW", value: totalNewCompanies },
   { label: "WIP", value: totalWipCompanies },
+  { label: "FOLLOW UP", value: totalFollowUpCompanies },
   { label: "YES", value: totalYesCompanies },
-  { label: "None", value: totalNoneCompanies },
+  { label: "NO", value: totalNoCompanies },
 ];
 
 const pipelineStatusMax = Math.max(
@@ -253,6 +320,29 @@ const shiftRange = (direction: -1 | 1) => {
     return next;
   });
 };
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setHideActivityFeed(localStorage.getItem(HIDE_ACTIVITY_FEED_KEY) === "true");
+    setHideActionItems(localStorage.getItem(HIDE_ACTION_ITEMS_KEY) === "true");
+  }, []);
+
+  useEffect(() => {
+    const loadTeamMembers = async () => {
+      const { data: userData } = await supabase.auth.getUser();
+      const user = userData.user;
+      if (!user?.id) return;
+
+      setCurrentUserName(buildCurrentUserName(user));
+      const { names, displayNamesByUserId } = await loadTeamMemberNamesForUser(
+        user.id
+      );
+      setTeamMemberRepOptions(names);
+      setUserDisplayNamesById(displayNamesByUserId);
+    };
+
+    loadTeamMembers();
+  }, []);
+
   useEffect(() => {
     const loadPageData = async () => {
       setLoading(true);
@@ -319,6 +409,11 @@ const shiftRange = (direction: -1 | 1) => {
             createdAt: note.created_at,
             dateLabel: date,
             timeLabel: time,
+            loggedByName: resolveCallEmailRepName(
+              note,
+              userDisplayNamesById,
+              company.rep
+            ),
           };
         })
         .filter(Boolean) as ActivityItem[];
@@ -328,7 +423,7 @@ const shiftRange = (direction: -1 | 1) => {
     };
 
     loadPageData();
-  }, []);
+  }, [userDisplayNamesById]);
 
  return (
   <section className="min-w-0 flex-1 border-r border-gray-200 bg-[#f5f7fb] text-[#111827]">
@@ -351,7 +446,7 @@ const shiftRange = (direction: -1 | 1) => {
                     className="h-12 cursor-pointer rounded-2xl border border-gray-300 bg-white px-4 text-sm text-gray-700 outline-none"
                   >
                     <option>All Reps</option>
-                    {REP_OPTIONS.map((rep) => (
+                    {salesRepFilterOptions.map((rep) => (
                       <option key={rep} value={rep}>
                         {rep}
                       </option>
@@ -474,102 +569,142 @@ const shiftRange = (direction: -1 | 1) => {
               <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
                 <div className="flex items-center justify-between gap-3">
                   <h3 className="text-xl font-semibold">Activity Feed</h3>
-                  <span className="rounded-full bg-[#eef6ff] px-3 py-1 text-sm font-medium text-gray-600">
-                    {filteredActivities.length} items
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = !hideActivityFeed;
+                        setHideActivityFeed(next);
+                        localStorage.setItem(HIDE_ACTIVITY_FEED_KEY, String(next));
+                      }}
+                      className={sectionToggleButtonClass}
+                    >
+                      {hideActivityFeed ? "Show Activity Feed" : "Hide Activity Feed"}
+                    </button>
+                    <span className="rounded-full bg-[#eef6ff] px-3 py-1 text-sm font-medium text-gray-600">
+                      {filteredActivities.length} items
+                    </span>
+                  </div>
                 </div>
-                
 
-                <div className="mt-5">
-                  {loading ? (
-                    <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
-                      Loading activity...
-                    </div>
-                  ) : filteredActivities.length === 0 ? (
-                    <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
-                      No calls or emails logged for this date yet.
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {filteredActivities.map((item) => (
-                        <div
-                          key={`${item.companyId}-${item.createdAt}-${item.type}`}
-                          className="rounded-2xl border border-gray-200 bg-gray-50 p-4"
-                        >
-                          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                            <div className="min-w-0">
-                              <p className="text-sm font-semibold text-[#111827]">
-                                {item.timeLabel} · {item.type} · {item.company}
+                <div
+                  className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${
+                    hideActivityFeed ? "grid-rows-[0fr]" : "grid-rows-[1fr]"
+                  }`}
+                >
+                  <div className="min-h-0 overflow-hidden">
+                    <div className="mt-5">
+                      {loading ? (
+                        <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                          Loading activity...
+                        </div>
+                      ) : filteredActivities.length === 0 ? (
+                        <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                          No calls or emails logged for this date yet.
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          {filteredActivities.map((item) => (
+                            <div
+                              key={`${item.companyId}-${item.createdAt}-${item.type}`}
+                              className="rounded-2xl border border-gray-200 bg-[#f8fafc] p-4"
+                            >
+                              <div className="flex items-center gap-2 text-sm font-semibold text-[#111827]">
+                                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white text-[#2F80ED] shadow-sm">
+                                  <ActivityIcon type={item.type} />
+                                </span>
+                                <span>{item.dateLabel}</span>
+                                <span className="text-gray-400">•</span>
+                                <span>{item.timeLabel}</span>
+                                <span className="text-gray-400">•</span>
+                                <span>{item.loggedByName}</span>
+                              </div>
+
+                              <p className="mt-2 text-sm font-semibold text-[#111827]">
+                                {item.company}
                               </p>
-                              <p className="mt-1 text-sm text-gray-500">
-                                {item.contact || "No contact"} · {item.rep || "No rep"} · {item.show || "No show"}
+
+                              <p className="mt-3 text-sm text-gray-600">
+                                {item.text || "No note added."}
                               </p>
                             </div>
-
-                            <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-gray-500 border border-gray-200">
-                              {item.dateLabel}
-                            </span>
-                          </div>
-
-                          <p className="mt-3 text-sm leading-6 text-gray-700">
-                            {item.text || "No note added."}
-                          </p>
+                          ))}
                         </div>
-                      ))}
+                      )}
                     </div>
-                  )}
+                  </div>
                 </div>
               </div>
-              
 
               <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
                 <div className="flex items-center justify-between gap-3">
                   <h3 className="text-xl font-semibold">Action Items</h3>
-                  <span className="rounded-full bg-[#fff7ed] px-3 py-1 text-sm font-medium text-amber-700">
-                    {actionItems.length} open
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = !hideActionItems;
+                        setHideActionItems(next);
+                        localStorage.setItem(HIDE_ACTION_ITEMS_KEY, String(next));
+                      }}
+                      className={sectionToggleButtonClass}
+                    >
+                      {hideActionItems ? "Show Action Items" : "Hide Action Items"}
+                    </button>
+                    <span className="rounded-full bg-[#fff7ed] px-3 py-1 text-sm font-medium text-amber-700">
+                      {actionItems.length} open
+                    </span>
+                  </div>
                 </div>
 
-                <div className="mt-5">
-                  {loading ? (
-                    <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
-                      Loading action items...
-                    </div>
-                  ) : actionItems.length === 0 ? (
-                    <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
-                      No companies need follow-up for this filter.
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {actionItems.map((company) => (
-                        <div
-                          key={company.id}
-                          className="rounded-2xl border border-gray-200 bg-gray-50 p-4"
-                        >
-                          <p className="font-semibold text-[#111827]">{company.company}</p>
-                          <p className="mt-1 text-sm text-gray-500">
-                            {company.contact || "No contact"} · {company.rep || "No rep"}
-                          </p>
-                          <p className="mt-1 text-sm text-gray-500">
-                            {company.show || "No show"} · {company.status}
-                          </p>
-
-                          <div className="mt-4 flex flex-wrap gap-2">
-                            <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-amber-700 border border-amber-200">
-                              Needs touch
-                            </span>
-
-                            <a
-                              href="/dashboard/pipeline"
-                              className="cursor-pointer rounded-full border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-100"
-                            >
-                              Open in Pipeline
-                            </a>
-                          </div>
+                <div
+                  className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${
+                    hideActionItems ? "grid-rows-[0fr]" : "grid-rows-[1fr]"
+                  }`}
+                >
+                  <div className="min-h-0 overflow-hidden">
+                    <div className="mt-5">
+                      {loading ? (
+                        <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                          Loading action items...
                         </div>
-                      ))}
+                      ) : actionItems.length === 0 ? (
+                        <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                          No companies need follow-up for this filter.
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          {actionItems.map((company) => (
+                            <div
+                              key={company.id}
+                              className="rounded-2xl border border-gray-200 bg-gray-50 p-4"
+                            >
+                              <p className="font-semibold text-[#111827]">{company.company}</p>
+                              <p className="mt-1 text-sm text-gray-500">
+                                {company.contact || "No contact"} · {company.rep || "No rep"}
+                              </p>
+                              <p className="mt-1 text-sm text-gray-500">
+                                {company.show || "No show"} · {company.status}
+                              </p>
+
+                              <div className="mt-4 flex flex-wrap gap-2">
+                                <span className="rounded-full border border-amber-200 bg-white px-3 py-1 text-xs font-medium text-amber-700">
+                                  Needs touch
+                                </span>
+
+                                <a
+                                  href="/dashboard/pipeline"
+                                  className="cursor-pointer rounded-full border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-100"
+                                >
+                                  Open in Pipeline
+                                </a>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  )}
+                  </div>
                 </div>
               </div>
             </div>

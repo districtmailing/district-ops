@@ -3,8 +3,25 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import * as XLSX from "xlsx";
+import {
+  STATUS_OPTIONS,
+  companyStatusClass,
+  normalizeCompanyStatus,
+} from "@/lib/companyStatus";
 import { needsFollowUp } from "@/lib/followUp";
 import { supabase } from "@/lib/supabase";
+import {
+  buildCreatorFieldsForSave,
+  isMissingCreatorColumnError,
+  resolveCallEmailRepName,
+  resolveContactingRepForSave,
+} from "@/lib/activityAttribution";
+import {
+  buildCurrentUserName,
+  getSalesRepOptions,
+  loadTeamMemberNamesForUser,
+  matchTeamMemberRep,
+} from "@/lib/teamMembers";
 type Company = {
   id: string;
   company: string;
@@ -60,14 +77,7 @@ type CalendarEvent = {
 
 
 function statusClass(status: string) {
-  const normalizedStatus = normalizeStatusValue(status);
-
-  if (normalizedStatus === "NONE") return "bg-amber-100 text-amber-700";
-  if (normalizedStatus === "YES") return "bg-teal-100 text-teal-700";
-  if (normalizedStatus === "NO") return "bg-rose-100 text-rose-700";
-  if (normalizedStatus === "Company Call Done") return "bg-green-100 text-green-700";
-  if (normalizedStatus === "WIP") return "bg-gray-200 text-gray-700";
-  return "bg-gray-100 text-gray-700";
+  return companyStatusClass(status);
 }
 
 function timeToMinutes(time: string) {
@@ -94,6 +104,13 @@ function formatActivityDateTime(value: string) {
       minute: "2-digit",
     }),
   };
+}
+
+function countCompanyActivity(
+  notes: { type: string }[] | undefined,
+  activityType: "Call" | "Email"
+) {
+  return (notes || []).filter((item) => item.type === activityType).length;
 }
 function formatDisplayDate(value?: string | null) {
   if (!value) return "—";
@@ -155,6 +172,27 @@ function ActivityIcon({ type }: { type: string }) {
     </svg>
   );
 }
+
+function NoteIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-4 w-4"
+    >
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <path d="M14 2v6h6" />
+      <path d="M16 13H8" />
+      <path d="M16 17H8" />
+      <path d="M10 9H8" />
+    </svg>
+  );
+}
+
 function shouldShowWarning(company: Company) {
   return needsFollowUp(company);
 }
@@ -198,37 +236,10 @@ function formatWebsiteUrl(url: string) {
 }
 
 
-const STATUS_OPTIONS = ["NONE", "WIP", "Company Call Done", "YES", "NO"];
 const IMPORT_STATUS_OPTIONS = STATUS_OPTIONS;
-const IMPORT_ADD_NEW_REP = "__ADD_NEW_REP__";
 const IMPORT_ADD_NEW_SHOW = "__ADD_NEW_SHOW__";
 const TEMPLATE_DEFAULT_USER = "Current User";
 const TEMPLATE_DEFAULT_SHOW = "ASD";
-
-function normalizeCompanyStatus(value: unknown) {
-  if (value === null || value === undefined) return "NONE";
-
-  const normalizedStatus = String(value).trim().toLowerCase();
-
-  if (!normalizedStatus) return "NONE";
-
-  const statusMap: Record<string, string> = {
-    none: "NONE",
-    wip: "WIP",
-    "company call done": "Company Call Done",
-    "company call": "Company Call Done",
-    yes: "YES",
-    y: "YES",
-    true: "YES",
-    "1": "YES",
-    no: "NO",
-    n: "NO",
-    false: "NO",
-    "0": "NO",
-  };
-
-  return statusMap[normalizedStatus] || "NONE";
-}
 
 const normalizeStatusValue = normalizeCompanyStatus;
 
@@ -246,7 +257,6 @@ const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [selectedCompanyId, setSelectedCompanyId] = useState("dynarex");
   const [activeTab, setActiveTab] = useState<"Overview" | "Notes" | "Activity" | "Documents">("Overview");
   const [tradeShowOptions, setTradeShowOptions] = useState<string[]>([]);
-const [repOptions, setRepOptions] = useState<string[]>([]);
 const [teamMemberRepOptions, setTeamMemberRepOptions] = useState<string[]>([]);
 const [currentTeamId, setCurrentTeamId] = useState<string | null>(null);
 const [manageTradeShowsOpen, setManageTradeShowsOpen] = useState(false);
@@ -294,13 +304,13 @@ const [editedEvent, setEditedEvent] = useState({
 const [editedCompany, setEditedCompany] = useState({
   company: "",
   show: "MedTrade",
-  rep: "William",
+  rep: "",
   contact: "",
   email: "",
   phone: "",
   website: "",
   address: "",
-  status: "NONE",
+  status: "NEW",
 });
 const [addModalOpen, setAddModalOpen] = useState(false);
 const [newCompany, setNewCompany] = useState({
@@ -313,7 +323,7 @@ const [newCompany, setNewCompany] = useState({
   website: "",
   address: "",
   latestNote: "",
-  status: "NONE",
+  status: "NEW",
 });
 const [importSheetModalOpen, setImportSheetModalOpen] = useState(false);
 const [importPreviewOpen, setImportPreviewOpen] = useState(false);
@@ -325,23 +335,56 @@ const [importFeedback, setImportFeedback] = useState<ImportFeedback | null>(null
 const [bulkImportSalesRep, setBulkImportSalesRep] = useState("");
 const [bulkImportShow, setBulkImportShow] = useState("");
 const [customTradeShow, setCustomTradeShow] = useState("");
-const [customSalesRep, setCustomSalesRep] = useState("");
-const [importSessionReps, setImportSessionReps] = useState<string[]>([]);
 const [importSessionShows, setImportSessionShows] = useState<string[]>([]);
-const [showImportNewRepInput, setShowImportNewRepInput] = useState(false);
 const [showImportNewShowInput, setShowImportNewShowInput] = useState(false);
-const [importNewRepDraft, setImportNewRepDraft] = useState("");
 const [importNewShowDraft, setImportNewShowDraft] = useState("");
 const [companySelectionMode, setCompanySelectionMode] = useState(false);
 const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([]);
 const [companyList, setCompanyList] = useState<Company[]>([]);
 const [companyNotes, setCompanyNotes] = useState<
-  Record<string, { date: string; time: string; type: string; text: string }[]>
+  Record<
+    string,
+    {
+      date: string;
+      time: string;
+      type: string;
+      text: string;
+      loggedByName?: string;
+    }[]
+  >
+>({});
+const [userDisplayNamesById, setUserDisplayNamesById] = useState<
+  Record<string, string>
 >({});
 const [showCompanyList, setShowCompanyList] = useState(true);
 const [currentViewMode, setCurrentViewMode] = useState<"cards" | "graph">("cards");
 const importFileRef = useRef<HTMLInputElement | null>(null);
 const importFeedbackTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+const salesRepOptions = useMemo(
+  () => getSalesRepOptions(teamMemberRepOptions, currentUserName),
+  [teamMemberRepOptions, currentUserName]
+);
+
+const lookupSalesRepId = async (repName: string) => {
+  const resolvedName = matchTeamMemberRep(
+    repName,
+    teamMemberRepOptions,
+    currentUserName
+  );
+
+  if (!resolvedName || resolvedName === "Unassigned") {
+    return { id: null as string | null, name: "" };
+  }
+
+  const { data } = await supabase
+    .from("sales_reps")
+    .select("id, name")
+    .eq("name", resolvedName)
+    .maybeSingle();
+
+  return { id: data?.id ?? null, name: resolvedName };
+};
 
   const filteredCompanies = useMemo(() => {
   return companyList.filter((c) => {
@@ -393,18 +436,29 @@ const selectedCompanyActivity =
       )
     : [];
 
+  const selectedCompanyNotesList = selectedCompany
+    ? companyNotes[selectedCompany.id]
+    : undefined;
+  const selectedCompanyCallCount = countCompanyActivity(
+    selectedCompanyNotesList,
+    "Call"
+  );
+  const selectedCompanyEmailCount = countCompanyActivity(
+    selectedCompanyNotesList,
+    "Email"
+  );
+
   const totalSuppliers = filteredCompanies.length;
   const totalWip = filteredCompanies.filter((c) => normalizeStatusValue(c.status) === "WIP").length;
-  const totalCallDone = filteredCompanies.filter(
-    (c) => normalizeStatusValue(c.status) === "Company Call Done"
+  const totalFollowUpStatus = filteredCompanies.filter(
+    (c) => normalizeStatusValue(c.status) === "FOLLOW UP"
   ).length;
   const totalYes = filteredCompanies.filter((c) => normalizeStatusValue(c.status) === "YES").length;
-  const totalFollowUp = filteredCompanies.filter((company) => needsFollowUp(company)).length;
 const currentViewGraphData = [
   { label: "Suppliers", value: totalSuppliers },
+  { label: "YES", value: totalYes },
   { label: "WIP", value: totalWip },
-  { label: "Call Done", value: totalCallDone },
-  { label: "Follow Up", value: totalFollowUp },
+  { label: "FOLLOW UP", value: totalFollowUpStatus },
 ];
 
 const currentViewGraphMax = Math.max(
@@ -701,18 +755,40 @@ const deleteEditedEvent = async () => {
   const saveCompanyNote = async () => {
   if (!newCompanyNote.trim()) return;
 
-  const { data, error } = await supabase
+  const loggedByName = resolveContactingRepForSave(
+    currentUserId,
+    userDisplayNamesById,
+    currentUserName,
+    selectedCompany.rep
+  );
+  const creatorFields = buildCreatorFieldsForSave(
+    currentUserId,
+    userDisplayNamesById,
+    currentUserName,
+    selectedCompany.rep
+  );
+
+  const baseNote = {
+    company_id: selectedCompany.id,
+    note_type: "Note",
+    note_text: newCompanyNote,
+  };
+
+  let insertResult = await supabase
     .from("company_notes")
-    .insert([
-      {
-        company_id: selectedCompany.id,
-        note_type: "Note",
-        note_text: newCompanyNote,
-      },
-    ])
+    .insert([{ ...baseNote, ...creatorFields }])
     .select()
     .single();
-   
+
+  if (insertResult.error && isMissingCreatorColumnError(insertResult.error)) {
+    insertResult = await supabase
+      .from("company_notes")
+      .insert([baseNote])
+      .select()
+      .single();
+  }
+
+  const { data, error } = insertResult;
 
   if (error) {
     console.error("Error saving company note:", error);
@@ -721,20 +797,25 @@ const deleteEditedEvent = async () => {
 
   const { date, time } = formatActivityDateTime(data.created_at);
 
-const currentNotes = companyNotes[selectedCompany.id] || [];
+  const currentNotes = companyNotes[selectedCompany.id] || [];
 
-setCompanyNotes({
-  ...companyNotes,
-  [selectedCompany.id]: [
-    {
-      date,
-      time,
-      type: "Note",
-      text: data.note_text,
-    },
-    ...currentNotes,
-  ],
-});
+  setCompanyNotes({
+    ...companyNotes,
+    [selectedCompany.id]: [
+      {
+        date,
+        time,
+        type: "Note",
+        text: data.note_text,
+        loggedByName: resolveCallEmailRepName(
+          { ...data, created_by_name: loggedByName },
+          userDisplayNamesById,
+          selectedCompany.rep
+        ),
+      },
+      ...currentNotes,
+    ],
+  });
 
   setNewCompanyNote("");
 };
@@ -747,11 +828,7 @@ const saveEditedCompany = async () => {
 const showName = editedCompany.show.trim();
 const statusName = normalizeStatusValue(editedCompany.status);
 
-const { data: repData } = await supabase
-  .from("sales_reps")
-  .select("id, name")
-  .eq("name", repName)
-  .maybeSingle();
+const { id: salesRepId } = await lookupSalesRepId(repName);
 
 const { data: showData } = await supabase
   .from("trade_shows")
@@ -770,7 +847,7 @@ const statusData = await resolveStatusData(statusName);
       phone: editedCompany.phone || null,
       website: editedCompany.website || null,
       address: editedCompany.address || null,
-      sales_rep_id: repData?.id ?? null,
+      sales_rep_id: salesRepId,
       trade_show_id: showData?.id ?? null,
       status_id: statusData?.id ?? null,
     })
@@ -1002,7 +1079,7 @@ const resolveStatusData = async (status: string) => {
 
   if (lookupError) {
     console.warn(`Status lookup failed for "${statusName}".`, lookupError);
-    if (statusName !== "NO" && statusName !== "NONE") return resolveStatusData("NONE");
+    if (statusName !== "NO" && statusName !== "NEW") return resolveStatusData("NEW");
     return null;
   }
 
@@ -1035,9 +1112,9 @@ const resolveStatusData = async (status: string) => {
 
   if (retriedStatus) return retriedStatus;
 
-  if (statusName !== "NO" && statusName !== "NONE") {
-    console.warn(`Status "${statusName}" could not be resolved. Falling back to NONE.`);
-    return resolveStatusData("NONE");
+  if (statusName !== "NO" && statusName !== "NEW") {
+    console.warn(`Status "${statusName}" could not be resolved. Falling back to NEW.`);
+    return resolveStatusData("NEW");
   }
 
   console.warn(`Status "${statusName}" could not be resolved.`);
@@ -1055,29 +1132,21 @@ const resolveImportLookups = async (row: ImportRow, mode: "create" | "update") =
 
   let repData: { id: string; name: string } | null = null;
 
-  if (repName && repName !== "Unassigned") {
-    const { data: existingRep } = await supabase
-      .from("sales_reps")
-      .select("id, name")
-      .eq("name", repName)
-      .maybeSingle();
+  if (repName) {
+    const resolvedRepName = matchTeamMemberRep(
+      repName,
+      teamMemberRepOptions,
+      currentUserName
+    );
 
-    repData = existingRep;
-
-    if (!repData && currentTeamId) {
-      const { data: insertedRep, error: insertRepError } = await supabase
+    if (resolvedRepName && resolvedRepName !== "Unassigned") {
+      const { data: existingRep } = await supabase
         .from("sales_reps")
-        .insert([{ name: repName, team_id: currentTeamId }])
         .select("id, name")
-        .single();
+        .eq("name", resolvedRepName)
+        .maybeSingle();
 
-      if (insertRepError) {
-        console.error("[Pipeline Import] save failure", insertRepError);
-        throw new Error("save failed while saving imported sales rep");
-      }
-
-      repData = insertedRep;
-      setRepOptions((prev) => (prev.includes(repName) ? prev : [...prev, repName].sort()));
+      repData = existingRep;
     }
   }
 
@@ -1143,6 +1212,9 @@ const saveImportedCompanyNote = async (companyId: string, row: ImportRow) => {
 
   const { date, time } = formatActivityDateTime(data.created_at);
 
+  const companyRep =
+    companyList.find((company) => company.id === companyId)?.rep || "";
+
   setCompanyNotes((prev) => ({
     ...prev,
     [companyId]: [
@@ -1151,6 +1223,11 @@ const saveImportedCompanyNote = async (companyId: string, row: ImportRow) => {
         time,
         type: "Note",
         text: data.note_text,
+        loggedByName: resolveCallEmailRepName(
+          data,
+          userDisplayNamesById,
+          companyRep
+        ),
       },
       ...(prev[companyId] || []),
     ],
@@ -1380,11 +1457,8 @@ const resetImportPreviewState = () => {
   setPendingDuplicateImport(null);
   setBulkImportSalesRep("");
   setBulkImportShow("");
-  setImportSessionReps([]);
   setImportSessionShows([]);
-  setShowImportNewRepInput(false);
   setShowImportNewShowInput(false);
-  setImportNewRepDraft("");
   setImportNewShowDraft("");
 };
 
@@ -1412,47 +1486,7 @@ setCompanyNameError("");
 const showName = newCompany.show.trim();
 const statusName = normalizeStatusValue(newCompany.status);
 
-let repData: { id: string; name: string } | null = null;
-
-if (newCompany.rep === "__ADD_NEW__") {
-  const trimmedCustomRep = customSalesRep.trim();
-
-  if (!trimmedCustomRep) {
-    alert("Please enter a sales rep name.");
-    return;
-  }
-
-  const { data: existingRep } = await supabase
-    .from("sales_reps")
-    .select("id, name")
-    .eq("name", trimmedCustomRep)
-    .maybeSingle();
-
-  if (existingRep) {
-    repData = existingRep;
-  } else {
-    const { data: insertedRep, error: insertRepError } = await supabase
-      .from("sales_reps")
-      .insert([{ name: trimmedCustomRep, team_id: currentTeamId }])
-      .select("id, name")
-      .single();
-
-    if (insertRepError) {
-      console.error("Error creating sales rep:", insertRepError);
-      return;
-    }
-
-    repData = insertedRep;
-  }
-} else {
-  const { data: existingRep } = await supabase
-    .from("sales_reps")
-    .select("id, name")
-    .eq("name", repName)
-    .maybeSingle();
-
-  repData = existingRep;
-}
+const { id: salesRepId } = await lookupSalesRepId(repName);
 
   let resolvedShowName = newCompany.show;
 let showData: { id: string; name: string } | null = null;
@@ -1519,7 +1553,7 @@ if (newCompany.show === "__ADD_NEW__") {
         website: newCompany.website || null,
         address: newCompany.address || null,
         latest_note: newCompany.latestNote || null,
-        sales_rep_id: repData?.id ?? null,
+        sales_rep_id: salesRepId,
         trade_show_id: showData?.id ?? null,
         status_id: statusData?.id ?? null,
       })
@@ -1572,10 +1606,9 @@ setActiveTab("Overview");
   website: "",
   address: "",
   latestNote: "",
-  status: "NONE",
+  status: "NEW",
 });
 setCustomTradeShow("");
-setCustomSalesRep("");
 
     setAddModalOpen(false);
     return;
@@ -1593,7 +1626,7 @@ setCustomSalesRep("");
         website: newCompany.website || null,
         address: newCompany.address || null,
         latest_note: newCompany.latestNote || null,
-        sales_rep_id: repData?.id ?? null,
+        sales_rep_id: salesRepId,
         trade_show_id: showData?.id ?? null,
         status_id: statusData?.id ?? null,
       },
@@ -1644,10 +1677,9 @@ setActiveTab("Overview");
   website: "",
   address: "",
   latestNote: "",
-  status: "NONE",
+  status: "NEW",
 });
 setCustomTradeShow("");
-setCustomSalesRep("");
 
   setAddModalOpen(false);
 };
@@ -1666,7 +1698,7 @@ const downloadImportTemplate = () => {
     TEMPLATE_DEFAULT_SHOW,
     salesRepSample,
     "John Smith",
-    "NONE",
+    "NEW",
     "john@example.com",
     "555-555-5555",
     "https://example.com",
@@ -1751,7 +1783,6 @@ const prepareImportSheet = async (file: File) => {
           "sheet_notes",
           "sheet notes",
         ]);
-        const defaultRep = currentUserName || TEMPLATE_DEFAULT_USER;
         const companyName = getImportCellValue(row, COMPANY_IMPORT_ALIASES);
         const rawStatus = getImportCellValue(row, ["status"]);
         const normalizedStatus = normalizeCompanyStatus(rawStatus);
@@ -1759,12 +1790,16 @@ const prepareImportSheet = async (file: File) => {
         const parsedRow: ImportRow = {
           company: companyName,
           show: getImportCellValue(row, SHOW_IMPORT_ALIASES),
-          rep: getImportCellValue(row, [
-            "rep",
-            "sales rep",
-            "sales_rep",
-            "representative",
-          ]) || defaultRep,
+          rep: matchTeamMemberRep(
+            getImportCellValue(row, [
+              "rep",
+              "sales rep",
+              "sales_rep",
+              "representative",
+            ]),
+            teamMemberRepOptions,
+            currentUserName
+          ),
           contact: getImportCellValue(row, [
             "contact",
             "contact name",
@@ -1802,14 +1837,15 @@ const prepareImportSheet = async (file: File) => {
     setPendingImportRows(parsedRows);
     setPendingImportFileName(file.name);
     setBulkImportSalesRep(
-      parsedRows[0]?.rep || currentUserName || TEMPLATE_DEFAULT_USER
+      matchTeamMemberRep(
+        parsedRows[0]?.rep || "",
+        teamMemberRepOptions,
+        currentUserName
+      ) || salesRepOptions[0] || "Unassigned"
     );
     setBulkImportShow("");
-    setImportSessionReps([]);
     setImportSessionShows([]);
-    setShowImportNewRepInput(false);
     setShowImportNewShowInput(false);
-    setImportNewRepDraft("");
     setImportNewShowDraft("");
     setImportPreviewOpen(true);
   } catch (error) {
@@ -1917,32 +1953,14 @@ const getImportSalesRepOptions = () =>
   Array.from(
     new Set(
       [
-        "Unassigned",
-        currentUserName,
-        TEMPLATE_DEFAULT_USER,
-        ...repOptions,
-        ...teamMemberRepOptions,
-        ...importSessionReps,
-        ...pendingImportRows.map((row) => row.rep),
+        ...salesRepOptions,
+        ...pendingImportRows.map((row) =>
+          matchTeamMemberRep(row.rep, teamMemberRepOptions, currentUserName)
+        ),
         bulkImportSalesRep,
       ].filter(Boolean)
     )
   ).sort((a, b) => a.localeCompare(b));
-
-const confirmImportNewRep = () => {
-  const trimmedName = importNewRepDraft.trim();
-  if (!trimmedName) return;
-
-  setImportSessionReps((prev) =>
-    prev.includes(trimmedName) ? prev : [...prev, trimmedName]
-  );
-  setRepOptions((prev) =>
-    prev.includes(trimmedName) ? prev : [...prev, trimmedName].sort()
-  );
-  setBulkImportSalesRep(trimmedName);
-  setShowImportNewRepInput(false);
-  setImportNewRepDraft("");
-};
 
 const confirmImportNewShow = () => {
   const trimmedName = importNewShowDraft.trim();
@@ -1980,12 +1998,18 @@ const updatePendingImportRow = (
 const applySalesRepToAllImportRows = () => {
   if (!bulkImportSalesRep) return;
 
+  const resolvedRep = matchTeamMemberRep(
+    bulkImportSalesRep,
+    teamMemberRepOptions,
+    currentUserName
+  );
+
   setPendingImportRows((prev) =>
-    prev.map((row) => ({ ...row, rep: bulkImportSalesRep }))
+    prev.map((row) => ({ ...row, rep: resolvedRep }))
   );
 
   setPendingDuplicateImport((prev) =>
-    prev ? { ...prev, row: { ...prev.row, rep: bulkImportSalesRep } } : prev
+    prev ? { ...prev, row: { ...prev.row, rep: resolvedRep } } : prev
   );
 };
 
@@ -2066,16 +2090,6 @@ useEffect(() => {
       setTradeShowOptions((tradeShowsData || []).map((item) => item.name));
     }
 
-    const { data: repsData, error: repsError } = await supabase
-      .from("sales_reps")
-      .select("name")
-      .order("name", { ascending: true });
-
-    if (repsError) {
-      console.error("Error loading sales reps:", repsError);
-    } else {
-      setRepOptions((repsData || []).map((item) => item.name));
-    }
   };
 
   loadFilterOptions();
@@ -2157,72 +2171,16 @@ useEffect(() => {
     const user = userData.user;
     const userId = user?.id;
 
-if (!userId) return;
+    if (!userId || !user) return;
 
-setCurrentUserId(userId);
+    setCurrentUserId(userId);
+    setCurrentUserName(buildCurrentUserName(user));
 
-const firstName = user?.user_metadata?.first_name || "";
-const lastName = user?.user_metadata?.last_name || "";
-const fullName =
-  `${firstName} ${lastName}`.trim() ||
-  user?.user_metadata?.full_name ||
-  user?.user_metadata?.name ||
-  user?.email?.split("@")[0] ||
-  "";
-setCurrentUserName(fullName);
-
-    const { data, error } = await supabase
-      .from("team_members")
-      .select("team_id")
-      .eq("user_id", userId)
-      .limit(1)
-      .maybeSingle();
-
-    if (error) {
-      console.error("Error loading team:", error);
-      return;
-    }
-
-    setCurrentTeamId(data?.team_id || null);
-
-    if (data?.team_id) {
-      const { data: membersData, error: membersError } = await supabase
-        .from("team_members")
-        .select(`
-          user_id,
-          profiles:user_id (
-            first_name,
-            last_name,
-            email
-          )
-        `)
-        .eq("team_id", data.team_id);
-
-      if (membersError) {
-        console.error("Error loading team members for import:", membersError);
-      } else {
-        const memberNames = (
-          (membersData || []) as {
-            profiles?:
-              | { first_name?: string; last_name?: string; email?: string }
-              | { first_name?: string; last_name?: string; email?: string }[];
-          }[]
-        )
-          .map((member) => {
-            const profile = Array.isArray(member.profiles)
-              ? member.profiles[0]
-              : member.profiles;
-            return (
-              `${profile?.first_name || ""} ${profile?.last_name || ""}`.trim() ||
-              profile?.email?.split("@")[0] ||
-              ""
-            );
-          })
-          .filter(Boolean);
-
-        setTeamMemberRepOptions(memberNames);
-      }
-    }
+    const { teamId, names, displayNamesByUserId } =
+      await loadTeamMemberNamesForUser(userId);
+    setCurrentTeamId(teamId);
+    setTeamMemberRepOptions(names);
+    setUserDisplayNamesById(displayNamesByUserId);
   };
 
   loadCurrentTeam();
@@ -2241,30 +2199,53 @@ useEffect(() => {
     }
 
     const groupedNotes: Record<
-  string,
-  { date: string; time: string; type: string; text: string }[]
-> = {};
+      string,
+      {
+        date: string;
+        time: string;
+        type: string;
+        text: string;
+        loggedByName?: string;
+      }[]
+    > = {};
+
+    const repByCompanyId = new Map(
+      companyList.map((company) => [company.id, company.rep])
+    );
 
     (data || []).forEach((note: any) => {
-     const { date, time } = formatActivityDateTime(note.created_at);
+      const { date, time } = formatActivityDateTime(note.created_at);
+      const showRepAttribution =
+        note.note_type === "Call" ||
+        note.note_type === "Email" ||
+        note.note_type === "Note";
 
-if (!groupedNotes[note.company_id]) {
-  groupedNotes[note.company_id] = [];
-}
+      if (!groupedNotes[note.company_id]) {
+        groupedNotes[note.company_id] = [];
+      }
 
-groupedNotes[note.company_id].push({
-  date,
-  time,
-  type: note.note_type,
-  text: note.note_text,
-});
+      groupedNotes[note.company_id].push({
+        date,
+        time,
+        type: note.note_type,
+        text: note.note_text,
+        ...(showRepAttribution
+          ? {
+              loggedByName: resolveCallEmailRepName(
+                note,
+                userDisplayNamesById,
+                repByCompanyId.get(note.company_id) || ""
+              ),
+            }
+          : {}),
+      });
     });
 
     setCompanyNotes(groupedNotes);
   };
 
   loadCompanyNotes();
-}, []);
+}, [userDisplayNamesById, companyList]);
 useEffect(() => {
   const loadEvents = async () => {
     if (!currentUserId) return;
@@ -2674,7 +2655,7 @@ useEffect(() => {
                 >
                   <option value="SALES REP">SALES REP</option>
 
-{repOptions.map((rep) => (
+{salesRepOptions.map((rep) => (
   <option key={rep} value={rep}>
     {rep}
   </option>
@@ -3036,9 +3017,12 @@ useEffect(() => {
         e.stopPropagation();
         handleMockAction("call", company.id);
       }}
-      className="cursor-pointer rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+      className="flex cursor-pointer items-center gap-1.5 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
     >
-      Call
+      <span>Call</span>
+      <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-gray-100 px-1.5 text-xs font-semibold text-gray-700 tabular-nums">
+        {countCompanyActivity(companyNotes[company.id], "Call")}
+      </span>
     </button>
 
     <button
@@ -3046,9 +3030,12 @@ useEffect(() => {
         e.stopPropagation();
         handleMockAction("email", company.id);
       }}
-      className="cursor-pointer rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+      className="flex cursor-pointer items-center gap-1.5 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
     >
-      Email
+      <span>Email</span>
+      <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-gray-100 px-1.5 text-xs font-semibold text-gray-700 tabular-nums">
+        {countCompanyActivity(companyNotes[company.id], "Email")}
+      </span>
     </button>
 
     <button
@@ -3125,7 +3112,12 @@ useEffect(() => {
             <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.08 4.18 2 2 0 0 1 4.06 2h3a2 2 0 0 1 2 1.72c.12.9.33 1.77.63 2.61a2 2 0 0 1-.45 2.11L8 9.91a16 16 0 0 0 6.09 6.09l1.47-1.24a2 2 0 0 1 2.11-.45c.84.3 1.71.51 2.61.63A2 2 0 0 1 22 16.92Z" />
           </svg>
         </span>
-        <span className="leading-none">Log Call</span>
+        <span className="flex flex-1 items-center justify-between gap-2 leading-none">
+          <span>Log Call</span>
+          <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-white/20 px-1.5 text-xs font-semibold tabular-nums">
+            {countCompanyActivity(companyNotes[company.id], "Call")}
+          </span>
+        </span>
       </button>
 
       <button
@@ -3138,22 +3130,12 @@ useEffect(() => {
             <path d="m4 7 8 6 8-6" />
           </svg>
         </span>
-        <span className="leading-none">Log Email</span>
-      </button>
-
-      <button
-        className="flex w-full items-center gap-3 border-b border-white/10 px-4 py-3 text-left text-[15px] transition hover:bg-gradient-to-r hover:from-[#0d3b42] hover:to-[#0c2f57]"
-      >
-        <span className="flex h-5 w-5 shrink-0 items-center justify-center text-white/95">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
-            <path d="M14 2v6h6" />
-            <path d="M9 15h6" />
-            <path d="M9 11h3" />
-            <path d="M9 19h6" />
-          </svg>
+        <span className="flex flex-1 items-center justify-between gap-2 leading-none">
+          <span>Log Email</span>
+          <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-white/20 px-1.5 text-xs font-semibold tabular-nums">
+            {countCompanyActivity(companyNotes[company.id], "Email")}
+          </span>
         </span>
-        <span className="leading-none">View Sheets</span>
       </button>
 
       <button
@@ -3440,16 +3422,22 @@ const width = 100 / overlapping.length;
               <div className="grid grid-cols-2 gap-3">
       <button
     onClick={() => handleMockAction("call", selectedCompany.id)}
-    className="cursor-pointer rounded-xl bg-[#2F80ED] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#256fd0]"
+    className="flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#2F80ED] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#256fd0]"
   >
-    Log Call
+    <span>Log Call</span>
+    <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-white/25 px-1.5 text-xs font-semibold tabular-nums">
+      {selectedCompanyCallCount}
+    </span>
   </button>
 
   <button
     onClick={() => handleMockAction("email", selectedCompany.id)}
-    className="cursor-pointer rounded-xl bg-[#2F80ED] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#256fd0]"
+    className="flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#2F80ED] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#256fd0]"
   >
-    Log Email
+    <span>Log Email</span>
+    <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-white/25 px-1.5 text-xs font-semibold tabular-nums">
+      {selectedCompanyEmailCount}
+    </span>
   </button>
 </div>
 
@@ -3688,11 +3676,22 @@ const width = 100 / overlapping.length;
       </div>
     ) : (
       selectedCompanyNotes.map((note, index) => (
-        <div key={index} className="rounded-2xl border border-gray-200 bg-[#f8fafc] p-4">
-          <p className="text-sm font-semibold text-[#111827]">
-            {note.date} · {note.type}
-          </p>
-          <p className="mt-2 text-sm text-gray-600">{note.text}</p>
+        <div
+          key={index}
+          className="rounded-2xl border border-gray-200 bg-[#f8fafc] p-4"
+        >
+          <div className="flex items-center gap-2 text-sm font-semibold text-[#111827]">
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-white text-[#2F80ED] shadow-sm">
+              <NoteIcon />
+            </span>
+            <span>{note.date}</span>
+            <span className="text-gray-400">•</span>
+            <span>{note.time}</span>
+            <span className="text-gray-400">•</span>
+            <span>{note.loggedByName}</span>
+          </div>
+
+          <p className="mt-3 text-sm text-gray-600">{note.text}</p>
         </div>
       ))
     )}
@@ -3734,6 +3733,8 @@ const width = 100 / overlapping.length;
             <span>{item.date}</span>
             <span className="text-gray-400">•</span>
             <span>{item.time}</span>
+            <span className="text-gray-400">•</span>
+            <span>{item.loggedByName}</span>
           </div>
 
           <p className="mt-3 text-sm text-gray-600">{item.text}</p>
@@ -3814,80 +3815,146 @@ const width = 100 / overlapping.length;
                   </button>
                   <button
  onClick={async () => {
-  if (mockActionCompany && mockNote.trim()) {
-    const activityType = mockAction === "call" ? "Call" : "Email";
+  if (!mockActionCompany || !mockNote.trim()) {
+    setMockAction(null);
+    setMockActionCompany(null);
+    setMockNote("");
+    return;
+  }
 
-    const { data, error } = await supabase
+  const activityType = mockAction === "call" ? "Call" : "Email";
+  const companyId = mockActionCompany.id;
+  const loggedByName = resolveContactingRepForSave(
+    currentUserId,
+    userDisplayNamesById,
+    currentUserName,
+    mockActionCompany.rep
+  );
+  const creatorFields = buildCreatorFieldsForSave(
+    currentUserId,
+    userDisplayNamesById,
+    currentUserName,
+    mockActionCompany.rep
+  );
+
+  const baseNote = {
+    company_id: companyId,
+    note_type: activityType,
+    note_text: mockNote,
+  };
+
+  let insertResult = await supabase
+    .from("company_notes")
+    .insert([{ ...baseNote, ...creatorFields }])
+    .select()
+    .single();
+
+  if (insertResult.error && isMissingCreatorColumnError(insertResult.error)) {
+    insertResult = await supabase
       .from("company_notes")
-      .insert([
-        {
-          company_id: mockActionCompany.id,
-          note_type: activityType,
-          note_text: mockNote,
-        },
-      ])
+      .insert([baseNote])
       .select()
       .single();
-
-    if (error) {
-      console.error("Error saving log:", JSON.stringify(error, null, 2));
-      return;
-    }
-    await supabase
-  .from("companies")
-  .update({
-    last_contacted_at: new Date().toISOString(),
-  })
-  .eq("id", mockActionCompany.id);
-
-setCompanyList((prev) =>
-  prev.map((company) =>
-    company.id === selectedCompany.id
-      ? { ...company, lastContactedAt: new Date().toISOString() }
-      : company
-  )
-);
-
-    const { date, time } = formatActivityDateTime(data.created_at);
-
-    const currentNotes = companyNotes[mockActionCompany.id] || [];
-
-    setCompanyNotes({
-      ...companyNotes,
-      [mockActionCompany.id]: [
-        {
-          date,
-          time,
-          type: activityType,
-          text: data.note_text,
-        },
-        ...currentNotes,
-      ],
-    });
-
-    const lastContactedAt = new Date().toISOString();
-
-await supabase
-  .from("companies")
-  .update({ last_contacted_at: lastContactedAt })
-  .eq("id", mockActionCompany.id);
-
-setCompanyList((prev) =>
-  prev.map((company) =>
-    company.id === mockActionCompany.id
-      ? { ...company, lastContactedAt }
-      : company
-  )
-);
-
-    setLogSuccessMessage(
-      activityType === "Call" ? "📞 Call logged" : "✉️ Email logged"
-    );
-
-    setTimeout(() => {
-      setLogSuccessMessage("");
-    }, 2000);
   }
+
+  const { data, error } = insertResult;
+
+  if (error) {
+    console.error("Error saving log:", JSON.stringify(error, null, 2));
+    return;
+  }
+
+  const lastContactedAt = new Date().toISOString();
+  const companyUpdate: {
+    last_contacted_at: string;
+    status_id?: string;
+  } = { last_contacted_at: lastContactedAt };
+
+  let nextStatus = mockActionCompany.status;
+
+  if (normalizeStatusValue(mockActionCompany.status) === "NEW") {
+    const statusData = await resolveStatusData("WIP");
+    if (statusData?.id) {
+      companyUpdate.status_id = statusData.id;
+      nextStatus = "WIP";
+    }
+  }
+
+  const { data: updatedCompany, error: updateError } = await supabase
+    .from("companies")
+    .update(companyUpdate)
+    .eq("id", companyId)
+    .select(`
+      id,
+      company_name,
+      contact_name,
+      email,
+      phone,
+      website,
+      address,
+      latest_note,
+      created_at,
+      last_contacted_at,
+      sales_reps:sales_rep_id(name),
+      trade_shows:trade_show_id(name),
+      statuses:status_id(name)
+    `)
+    .single();
+
+  if (updateError) {
+    console.error("Error updating company after log:", updateError);
+  }
+
+  const formattedCompany = updatedCompany
+    ? mapCompanyRow(updatedCompany)
+    : {
+        ...mockActionCompany,
+        lastContactedAt,
+        status: nextStatus,
+        calls:
+          activityType === "Call"
+            ? mockActionCompany.calls + 1
+            : mockActionCompany.calls,
+        emails:
+          activityType === "Email"
+            ? mockActionCompany.emails + 1
+            : mockActionCompany.emails,
+      };
+
+  setCompanyList((prev) =>
+    prev.map((company) =>
+      company.id === companyId ? formattedCompany : company
+    )
+  );
+
+  const { date, time } = formatActivityDateTime(data.created_at);
+  const currentNotes = companyNotes[companyId] || [];
+
+  setCompanyNotes({
+    ...companyNotes,
+    [companyId]: [
+      {
+        date,
+        time,
+        type: activityType,
+        text: data.note_text,
+        loggedByName: resolveCallEmailRepName(
+          { ...data, created_by_name: loggedByName },
+          userDisplayNamesById,
+          mockActionCompany.rep
+        ),
+      },
+      ...currentNotes,
+    ],
+  });
+
+  setLogSuccessMessage(
+    activityType === "Call" ? "📞 Call logged" : "✉️ Email logged"
+  );
+
+  setTimeout(() => {
+    setLogSuccessMessage("");
+  }, 2000);
 
   setMockAction(null);
   setMockActionCompany(null);
@@ -3972,7 +4039,6 @@ setCompanyList((prev) =>
 
     if (value !== "__ADD_NEW__") {
       setCustomTradeShow("");
-      setCustomSalesRep("");
     }
   }}
   className="w-full rounded-2xl border border-gray-300 bg-white px-4 py-3 text-gray-900 outline-none focus:border-blue-500"
@@ -4007,7 +4073,7 @@ setCompanyList((prev) =>
             }
             className="w-full rounded-2xl border border-gray-300 bg-white px-4 py-3 text-gray-900 outline-none focus:border-blue-500"
           >
-            {repOptions.map((rep) => (
+            {salesRepOptions.map((rep) => (
               <option key={rep} value={rep}>
                 {rep}
               </option>
@@ -4159,35 +4225,18 @@ setCompanyList((prev) =>
   <select
     value={newCompany.rep}
     onChange={(e) => {
-      const value = e.target.value;
-      setNewCompany({ ...newCompany, rep: value });
-
-      if (value !== "__ADD_NEW__") {
-        setCustomSalesRep("");
-      }
+      setNewCompany({ ...newCompany, rep: e.target.value });
     }}
     className="w-full rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
   >
     <option value="">SALES REP</option>
 
-    {repOptions.map((rep) => (
+    {salesRepOptions.map((rep) => (
       <option key={rep} value={rep}>
         {rep}
       </option>
     ))}
-
-    <option value="__ADD_NEW__">ADD NEW</option>
   </select>
-
-  {newCompany.rep === "__ADD_NEW__" && (
-    <input
-      type="text"
-      placeholder="Enter new sales rep name"
-      value={customSalesRep}
-      onChange={(e) => setCustomSalesRep(e.target.value)}
-      className="mt-2 w-full rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
-    />
-  )}
 </div>
 <select
   value={newCompany.show}
@@ -4197,7 +4246,6 @@ setCompanyList((prev) =>
 
     if (value !== "__ADD_NEW__") {
       setCustomTradeShow("");
-      setCustomSalesRep("");
     }
   }}
   className="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
@@ -4564,18 +4612,8 @@ setCompanyList((prev) =>
               Sales Rep
             </span>
             <select
-              value={
-                showImportNewRepInput ? IMPORT_ADD_NEW_REP : bulkImportSalesRep
-              }
-              onChange={(e) => {
-                if (e.target.value === IMPORT_ADD_NEW_REP) {
-                  setShowImportNewRepInput(true);
-                  setImportNewRepDraft("");
-                  return;
-                }
-                setShowImportNewRepInput(false);
-                setBulkImportSalesRep(e.target.value);
-              }}
+              value={bulkImportSalesRep}
+              onChange={(e) => setBulkImportSalesRep(e.target.value)}
               className={`${importCellInputClass} mt-1`}
             >
               <option value="">Select rep...</option>
@@ -4584,12 +4622,11 @@ setCompanyList((prev) =>
                   {rep}
                 </option>
               ))}
-              <option value={IMPORT_ADD_NEW_REP}>+ Add New Sales Rep</option>
             </select>
           </label>
           <button
             onClick={applySalesRepToAllImportRows}
-            disabled={!bulkImportSalesRep || showImportNewRepInput}
+            disabled={!bulkImportSalesRep}
             className="cursor-pointer rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Apply to All
@@ -4624,33 +4661,6 @@ setCompanyList((prev) =>
           </div>
         )}
 
-        {showImportNewRepInput && (
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              value={importNewRepDraft}
-              onChange={(e) => setImportNewRepDraft(e.target.value)}
-              placeholder="Enter new sales rep name"
-              className={`${importCellInputClass} w-56`}
-            />
-            <button
-              type="button"
-              onClick={confirmImportNewRep}
-              className="cursor-pointer rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-xs font-medium text-green-700 hover:bg-green-100"
-            >
-              Add Rep
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setShowImportNewRepInput(false);
-                setImportNewRepDraft("");
-              }}
-              className="cursor-pointer rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50"
-            >
-              Cancel
-            </button>
-          </div>
-        )}
       </div>
 
       <div className="mt-4 max-h-[360px] overflow-y-auto overflow-x-hidden rounded-2xl border border-gray-200">

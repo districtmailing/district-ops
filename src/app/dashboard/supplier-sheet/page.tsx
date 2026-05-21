@@ -3,6 +3,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Papa from "papaparse";
+import { supabase } from "@/lib/supabase";
+import {
+  createSupplierSheetWithRows,
+  deleteSupplierSheet,
+  listSupplierSheets,
+  listSupplierSheetSupplierOptions,
+  saveSupplierSheetSupplierOption,
+  type SupplierSheetSummary,
+} from "@/lib/supplierSheets";
 
 type SupplierRow = Record<string, string>;
 
@@ -61,40 +70,23 @@ type MappingFields = {
   custom3: string;
 };
 
-const initialSuppliers = ["ResMed", "Country Life", "ABC Supply"];
-
-const initialSheets: UploadedSheet[] = [
-  {
-    id: "1",
-    sheetName: "ResMed - Tony (1)",
-    supplier: "—",
-    status: "Uploaded",
-    rows: 10,
-    bad: 0,
-    upcs: 10,
-    noAsin: 10,
-    asins: 0,
-    buyer: "Dalin",
-    progress: 100,
-    date: "Apr 13",
+function summaryToUploadedSheet(sheet: SupplierSheetSummary): UploadedSheet {
+  return {
+    id: sheet.id,
+    sheetName: sheet.sheetName,
+    supplier: sheet.supplier,
+    status: sheet.status,
+    rows: sheet.rows,
+    bad: sheet.bad,
+    upcs: sheet.upcs,
+    noAsin: sheet.noAsin,
+    asins: sheet.asins,
+    buyer: sheet.buyer,
+    progress: sheet.progress,
+    date: sheet.date,
     uploadedRows: [],
-  },
-  {
-    id: "2",
-    sheetName: "Country Life - Bio Line (2)",
-    supplier: "test",
-    status: "Uploaded",
-    rows: 256,
-    bad: 0,
-    upcs: 256,
-    noAsin: 256,
-    asins: 0,
-    buyer: "Dalin",
-    progress: 100,
-    date: "Dec 22",
-    uploadedRows: [],
-  },
-];
+  };
+}
 
 const emptyMapping: MappingFields = {
   upc: "",
@@ -142,27 +134,44 @@ export default function SupplierSheetPage() {
   const [search, setSearch] = useState("");
   const [supplierFilter, setSupplierFilter] = useState("All Suppliers");
   const [sheets, setSheets] = useState<UploadedSheet[]>([]);
+  const [loadMessage, setLoadMessage] = useState("");
+  const [savingUpload, setSavingUpload] = useState(false);
+
+  const loadSheets = async () => {
+    try {
+      const savedSheets = await listSupplierSheets();
+      setLoadMessage("");
+      setSheets(savedSheets.map(summaryToUploadedSheet));
+    } catch (error) {
+      console.error("Error loading supplier sheets:", error);
+      setSheets([]);
+      setLoadMessage("Could not load supplier sheets from Supabase.");
+    }
+  };
+
+  const loadSuppliers = async () => {
+    try {
+      const names = await listSupplierSheetSupplierOptions();
+      setSuppliers(names);
+    } catch (error) {
+      console.error("Error loading suppliers:", error);
+      setSuppliers([]);
+    }
+  };
 
   useEffect(() => {
-  const savedSheets = window.localStorage.getItem("supplierSheets");
+    loadSheets();
+    loadSuppliers();
 
-  if (savedSheets) {
-    try {
-      setSheets(JSON.parse(savedSheets));
-      return;
-    } catch (error) {
-      console.error("Failed to parse supplierSheets from localStorage", error);
-    }
-  }
+    const { data: authListener } = supabase.auth.onAuthStateChange(() => {
+      loadSheets();
+      loadSuppliers();
+    });
 
-  setSheets(initialSheets);
-}, []);
-
-useEffect(() => {
-  if (sheets.length > 0) {
-    window.localStorage.setItem("supplierSheets", JSON.stringify(sheets));
-  }
-}, [sheets]);
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
 
   const [uploadOpen, setUploadOpen] = useState(false);
   const [showMapping, setShowMapping] = useState(false);
@@ -170,7 +179,8 @@ useEffect(() => {
 
   const [sheetName, setSheetName] = useState("");
   const [selectedSupplier, setSelectedSupplier] = useState("");
-  const [suppliers, setSuppliers] = useState<string[]>(initialSuppliers);
+  const [suppliers, setSuppliers] = useState<string[]>([]);
+  const [savingSupplier, setSavingSupplier] = useState(false);
   const [addingSupplier, setAddingSupplier] = useState(false);
   const [newSupplier, setNewSupplier] = useState("");
 
@@ -305,20 +315,28 @@ useEffect(() => {
     });
   };
 
-  const handleAddSupplier = () => {
+  const handleAddSupplier = async () => {
     const cleaned = newSupplier.trim();
     if (!cleaned) return;
 
-    if (!suppliers.includes(cleaned)) {
-      setSuppliers((prev) => [...prev, cleaned]);
+    setSavingSupplier(true);
+    try {
+      await saveSupplierSheetSupplierOption(cleaned);
+      const names = await listSupplierSheetSupplierOptions();
+      setSuppliers(names);
+      setSelectedSupplier(cleaned);
+      setAddingSupplier(false);
+      setNewSupplier("");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to save supplier.";
+      setUploadError(message);
+    } finally {
+      setSavingSupplier(false);
     }
-
-    setSelectedSupplier(cleaned);
-    setAddingSupplier(false);
-    setNewSupplier("");
   };
 
-  const handleUploadSheet = () => {
+  const handleUploadSheet = async () => {
     if (!sheetName.trim()) {
       setUploadError("Sheet Name is required.");
       return;
@@ -346,30 +364,34 @@ useEffect(() => {
       amazonMatch: null,
     }));
 
-    const newSheet: UploadedSheet = {
-      id: crypto.randomUUID(),
-      sheetName: sheetName.trim(),
-      supplier: selectedSupplier || "—",
-      status: "Uploaded",
-      rows: parsedRows.length,
-      bad: invalidRows,
-      upcs: validRows,
-      noAsin: validRows,
-      asins: 0,
-      buyer: "Dalin",
-      progress: 100,
-      date: new Date().toLocaleDateString("en-US", {
-  month: "2-digit",
-  day: "2-digit",
-  year: "2-digit",
-}),
-      uploadedRows,
-    };
+    setSavingUpload(true);
+    setUploadError("");
 
-    setSheets((prev) => [newSheet, ...prev]);
-    closeUpload();
-    setToast("Sheet uploaded successfully");
-    window.setTimeout(() => setToast(""), 2500);
+    try {
+      const saved = await createSupplierSheetWithRows({
+        sheetName: sheetName.trim(),
+        supplier: selectedSupplier || "—",
+        originalFileName: selectedFileName,
+        rows: uploadedRows,
+        bad: invalidRows,
+        upcs: validRows,
+      });
+
+      setSheets((prev) => [summaryToUploadedSheet(saved), ...prev]);
+      if (selectedSupplier) {
+        const names = await listSupplierSheetSupplierOptions();
+        setSuppliers(names);
+      }
+      closeUpload();
+      setToast("Supplier sheet saved.");
+      window.setTimeout(() => setToast(""), 2500);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to save supplier sheet.";
+      setUploadError(message);
+    } finally {
+      setSavingUpload(false);
+    }
   };
 
   const renderSelect = (
@@ -458,8 +480,17 @@ useEffect(() => {
     XLSX.writeFile(workbook, "supplier_sheet_template.xlsx");
   };
 
-  const deleteSheet = (sheetId: string) => {
-    setSheets((prev) => prev.filter((sheet) => sheet.id !== sheetId));
+  const deleteSheet = async (sheetId: string) => {
+    try {
+      await deleteSupplierSheet(sheetId);
+      setSheets((prev) => prev.filter((sheet) => sheet.id !== sheetId));
+      setToast("Supplier sheet deleted.");
+      window.setTimeout(() => setToast(""), 2000);
+    } catch (error) {
+      console.error("Failed to delete supplier sheet:", error);
+      setToast("Could not delete supplier sheet.");
+      window.setTimeout(() => setToast(""), 2500);
+    }
   };
   const retrySheetLoad = (sheetId: string) => {
   setToast("Retrying sheet...");
@@ -468,9 +499,9 @@ useEffect(() => {
 
   return (
     <section className="min-w-0 flex-1 bg-[#f7f8fa] text-[#111827]">
-      <div className="border-b border-gray-200 bg-white px-6 py-5 lg:px-8">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-          <div>
+      <div className="border-b border-gray-200 bg-white px-4 py-5 lg:px-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0 flex-1">
             <h2 className="text-4xl font-bold tracking-tight text-[#111827]">
               Supplier Sheets
             </h2>
@@ -479,7 +510,7 @@ useEffect(() => {
             </p>
           </div>
 
-          <div className="flex flex-wrap gap-3">
+          <div className="flex shrink-0 flex-wrap gap-3">
             <button className="rounded-xl border border-gray-300 bg-white px-5 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50">
               Create PO
             </button>
@@ -493,11 +524,15 @@ useEffect(() => {
         </div>
       </div>
 
-      <div className="px-6 py-6 lg:px-8">
+      <div className="px-4 py-6 lg:px-6">
         <div className="rounded-2xl border border-[#f1d27a] bg-[#fff7df] px-5 py-4 text-[#8a6500]">
           Connect your Amazon Seller account in Settings → Integrations to enable
           product matching.
         </div>
+
+        {loadMessage ? (
+          <p className="mt-5 text-sm font-medium text-amber-800">{loadMessage}</p>
+        ) : null}
 
         <div className="mt-5 flex flex-col gap-3 xl:flex-row">
           <input
@@ -526,21 +561,21 @@ useEffect(() => {
 
         <div className="mt-5 overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm">
           <div className="overflow-x-auto">
-            <table className="w-full table-fixed text-left">
-              <thead className="bg-[#f8fafc] text-xs uppercase tracking-[0.16em] text-gray-500">
+            <table className="w-full min-w-[1080px] text-left text-sm">
+              <thead className="bg-[#f8fafc] text-[10px] uppercase tracking-[0.14em] text-gray-500">
                 <tr className="border-b border-gray-200">
-  <th className="w-[20%] px-3 py-4 text-left font-semibold">Sheet Name</th>
-  <th className="w-[10%] px-3 py-4 text-left font-semibold">Supplier</th>
-  <th className="w-[9%] px-3 py-4 text-center font-semibold">Status</th>
-  <th className="w-[5%] px-3 py-4 text-center font-semibold">Rows</th>
-  <th className="w-[5%] px-3 py-4 text-center font-semibold text-red-500">Bad</th>
-  <th className="w-[6%] px-3 py-4 text-center font-semibold">UPCs</th>
-  <th className="w-[8%] px-3 py-4 text-center font-semibold whitespace-nowrap text-yellow-600">NO ASIN</th>
-  <th className="w-[6%] px-3 py-4 text-center font-semibold text-green-600">ASINS</th>
-  <th className="w-[7%] px-3 py-4 text-center font-semibold">Buyer</th>
-  <th className="w-[11%] px-3 py-4 text-center font-semibold">Progress</th>
-  <th className="w-[6%] px-3 py-4 text-center font-semibold">Date</th>
-  <th className="w-[90px] px-3 py-4 text-right font-semibold">Actions</th>
+  <th className="min-w-[9rem] max-w-[11rem] px-2 py-3 text-left font-semibold">Sheet Name</th>
+  <th className="min-w-[5.5rem] max-w-[7rem] px-2 py-3 text-left font-semibold">Supplier</th>
+  <th className="w-[4.5rem] px-1.5 py-3 text-center font-semibold">Status</th>
+  <th className="w-[3rem] px-1 py-3 text-center font-semibold">Rows</th>
+  <th className="w-[2.75rem] px-1 py-3 text-center font-semibold text-red-500">Bad</th>
+  <th className="w-[3rem] px-1 py-3 text-center font-semibold">UPCs</th>
+  <th className="w-[4.25rem] px-1 py-3 text-center font-semibold whitespace-nowrap text-yellow-600">NO ASIN</th>
+  <th className="w-[3.25rem] px-1 py-3 text-center font-semibold text-green-600">ASINS</th>
+  <th className="min-w-[7.5rem] px-2 py-3 text-left font-semibold">Buyer</th>
+  <th className="min-w-[8.5rem] px-2 py-3 text-left font-semibold">Progress</th>
+  <th className="w-[4.5rem] px-1.5 py-3 text-center font-semibold">Date</th>
+  <th className="w-[4.75rem] px-1 py-3 text-right font-semibold">Actions</th>
 </tr>
               </thead>
 
@@ -550,10 +585,10 @@ useEffect(() => {
   key={sheet.id}
   className="border-b border-gray-100 text-sm text-gray-800 hover:bg-[#f9fbfc]"
 >
-  <td className="px-3 py-4">
+  <td className="max-w-[11rem] px-2 py-3">
   <button
     onClick={() => router.push(`/dashboard/supplier-sheet/${sheet.id}`)}
-    className="block w-full max-w-[160px] truncate text-left font-semibold text-[#3b82f6] transition hover:text-[#2563eb]"
+    className="block w-full min-w-0 truncate text-left font-semibold text-[#3b82f6] transition hover:text-[#2563eb]"
     style={{
       textDecoration: "underline",
       textUnderlineOffset: "3px",
@@ -564,37 +599,43 @@ useEffect(() => {
   </button>
 </td>
 
-  <td className="px-3 py-4">{sheet.supplier}</td>
+  <td className="max-w-[7rem] px-2 py-3" title={sheet.supplier}>
+    <span className="block truncate">{sheet.supplier}</span>
+  </td>
 
-  <td className="px-3 py-4 text-center">
-    <span className="inline-flex rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs font-semibold text-gray-700">
+  <td className="px-1.5 py-3 text-center">
+    <span className="inline-flex rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-semibold text-gray-700">
       {sheet.status}
     </span>
   </td>
 
-  <td className="px-3 py-4 text-center">{sheet.rows}</td>
-  <td className="px-3 py-4 text-center text-red-500">{sheet.bad}</td>
-  <td className="px-3 py-4 text-center">{sheet.upcs}</td>
-  <td className="px-3 py-4 text-center whitespace-nowrap text-yellow-600">{sheet.noAsin}</td>
-  <td className="px-3 py-4 text-center text-green-600">{sheet.asins}</td>
-  <td className="px-3 py-4 text-center">{sheet.buyer}</td>
+  <td className="px-1 py-3 text-center tabular-nums">{sheet.rows}</td>
+  <td className="px-1 py-3 text-center tabular-nums text-red-500">{sheet.bad}</td>
+  <td className="px-1 py-3 text-center tabular-nums">{sheet.upcs}</td>
+  <td className="px-1 py-3 text-center tabular-nums whitespace-nowrap text-yellow-600">{sheet.noAsin}</td>
+  <td className="px-1 py-3 text-center tabular-nums text-green-600">{sheet.asins}</td>
+  <td className="min-w-[7.5rem] px-2 py-3 text-left" title={sheet.buyer}>
+    <span className="block whitespace-nowrap">{sheet.buyer || "—"}</span>
+  </td>
 
-  <td className="px-3 py-4">
-    <div className="flex items-center justify-center gap-2">
-      <div className="h-2 w-16 overflow-hidden rounded-full bg-gray-200">
+  <td className="min-w-[8.5rem] px-2 py-3">
+    <div className="flex min-w-[8rem] items-center gap-2">
+      <div className="h-2 min-w-[3.5rem] flex-1 overflow-hidden rounded-full bg-gray-200">
         <div
           className="h-full rounded-full bg-gradient-to-r from-teal-400 to-blue-500"
-          style={{ width: `${sheet.progress}%` }}
+          style={{ width: `${Math.min(100, Math.max(0, sheet.progress))}%` }}
         />
       </div>
-      <span className="text-xs text-gray-500">{sheet.progress}%</span>
+      <span className="w-9 shrink-0 text-right text-xs tabular-nums text-gray-600">
+        {sheet.progress}%
+      </span>
     </div>
   </td>
 
-  <td className="px-3 py-4 text-center whitespace-nowrap text-gray-500">
+  <td className="px-1.5 py-3 text-center text-xs whitespace-nowrap text-gray-500">
     {sheet.date}
   </td>
-                    <td className="px-4 py-5">
+                    <td className="px-1 py-3">
   <div className="flex items-center justify-end gap-2">
     
     {/* Retry */}
@@ -784,10 +825,11 @@ useEffect(() => {
                       className="flex-1 rounded-xl border border-gray-300 bg-white px-4 py-3 text-gray-900 outline-none placeholder:text-gray-400"
                     />
                     <button
-                      onClick={handleAddSupplier}
-                      className="rounded-xl bg-gradient-to-r from-teal-400 to-blue-500 px-5 py-3 font-semibold text-white"
+                      onClick={() => void handleAddSupplier()}
+                      disabled={savingSupplier}
+                      className="rounded-xl bg-gradient-to-r from-teal-400 to-blue-500 px-5 py-3 font-semibold text-white disabled:opacity-60"
                     >
-                      Save Supplier
+                      {savingSupplier ? "Saving…" : "Save Supplier"}
                     </button>
                   </div>
                 )}
@@ -1033,10 +1075,11 @@ useEffect(() => {
                       Cancel
                     </button>
                     <button
-                      onClick={handleUploadSheet}
-                      className="rounded-xl bg-gradient-to-r from-teal-400 to-blue-500 px-5 py-3 font-semibold text-white shadow-sm"
+                      onClick={() => void handleUploadSheet()}
+                      disabled={savingUpload}
+                      className="rounded-xl bg-gradient-to-r from-teal-400 to-blue-500 px-5 py-3 font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      Upload Sheet
+                      {savingUpload ? "Saving…" : "Upload Sheet"}
                     </button>
                   </div>
                 </div>
